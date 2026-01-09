@@ -1919,11 +1919,35 @@
             startAutoRefresh();
             
             // Check auth status first, then connectivity (auth status takes priority)
-            checkAuthStatus().then(() => {
-                // After auth status is checked, update connectivity to match
-                checkConnectivity();
-            });
+            // Initialize with NOT authenticated state first
+            const authStatusEl = document.getElementById('authStatus');
+            const disconnectBtn = document.getElementById('disconnectButton');
+            if (authStatusEl) {
+                authStatusEl.className = 'status-badge not-authenticated';
+                authStatusEl.innerHTML = '<i class="fas fa-lock"></i><span id="authStatusText">Not Authenticated</span>';
+                authStatusEl.onclick = function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    showAuthModal();
+                };
+                authStatusEl.style.cursor = 'pointer';
+                authStatusEl.style.display = 'block';
+            }
+            if (disconnectBtn) {
+                disconnectBtn.style.display = 'none';
+            }
             
+            // Then check actual auth status after a small delay
+            setTimeout(() => {
+                checkAuthStatus().then(() => {
+                    // After auth status is checked, update connectivity to match (only if authenticated)
+                    const authStatusEl = document.getElementById('authStatus');
+                    if (authStatusEl && authStatusEl.classList.contains('authenticated')) {
+                        checkConnectivity();
+                    }
+                });
+            }, 100);
+
             // Check auth status every 5 seconds to keep button and label in sync
             setInterval(checkAuthStatus, 5000);
             // Check connectivity less frequently and only if auth is OK
@@ -2573,8 +2597,9 @@
                 
                 console.log('[AUTH STATUS] Response:', data);
                 
-                // Check if authenticated - handle both 'authenticated' and 'status' fields
-                const isAuthenticated = data.authenticated === true || (data.status === 'success' && data.authenticated === true);
+                // CRITICAL: Only set as authenticated if explicitly authenticated with access token
+                // This prevents showing as connected when session exists from another machine
+                const isAuthenticated = data.authenticated === true && data.has_access_token === true;
                 
                 const authStatusEl = document.getElementById('authStatus');
                 const authStatusText = document.getElementById('authStatusText');
@@ -2587,6 +2612,12 @@
                         authStatusEl.removeAttribute('onclick'); // Remove inline onclick
                         authStatusEl.style.cursor = 'default';
                         authStatusEl.style.pointerEvents = 'none';
+                        
+                        // Show disconnect button
+                        const disconnectBtn = document.getElementById('disconnectButton');
+                        if (disconnectBtn) {
+                            disconnectBtn.style.display = 'inline-block';
+                        }
                         
                         // Update account name display if available
                         if (data.account_name) {
@@ -2606,6 +2637,11 @@
                             userId.textContent = data.user_id || data.broker_id || '-';
                         }
                     } else {
+                        // Hide disconnect button when not authenticated
+                        const disconnectBtn = document.getElementById('disconnectButton');
+                        if (disconnectBtn) {
+                            disconnectBtn.style.display = 'none';
+                        }
                         // Hide user info when not authenticated
                         const userInfo = document.getElementById('userInfo');
                         const userName = document.getElementById('userName');
@@ -3148,6 +3184,75 @@
                 minute: '2-digit',
                 second: '2-digit'
             });
+        }
+        
+        // Disconnect from Zerodha
+        async function disconnectZerodha() {
+            if (!confirm('Are you sure you want to disconnect from Zerodha? This will clear all authentication credentials.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/auth/disconnect', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Clear auth details display
+                    const fields = ['authApiKey', 'authApiSecret', 'authAccessToken', 'authRequestToken', 
+                                  'authEmail', 'authBroker', 'authUserId', 'authAccountName', 'authFullName'];
+                    fields.forEach(id => {
+                        const el = document.getElementById(id);
+                        if (el) el.textContent = '-';
+                    });
+                    
+                    // Hide disconnect button
+                    const disconnectBtn = document.getElementById('disconnectButton');
+                    if (disconnectBtn) {
+                        disconnectBtn.style.display = 'none';
+                    }
+                    
+                    // Update auth status
+                    const authStatusEl = document.getElementById('authStatus');
+                    if (authStatusEl) {
+                        authStatusEl.className = 'status-badge not-authenticated';
+                        authStatusEl.innerHTML = '<i class="fas fa-lock"></i><span id="authStatusText">Not Authenticated</span>';
+                        authStatusEl.onclick = function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            showAuthModal();
+                        };
+                        authStatusEl.style.cursor = 'pointer';
+                        authStatusEl.style.display = 'block';
+                    }
+                    
+                    // Hide user info
+                    const userInfo = document.getElementById('userInfo');
+                    if (userInfo) {
+                        userInfo.style.display = 'none';
+                    }
+                    
+                    // Update connection status
+                    const connectionDot = document.getElementById('connectionDot');
+                    const connectionText = document.getElementById('connectionText');
+                    if (connectionDot) connectionDot.className = 'status-dot disconnected';
+                    if (connectionText) connectionText.textContent = 'Disconnected';
+                    
+                    alert('Disconnected successfully. Please authenticate again to continue.');
+                    
+                    // Refresh page to reset state
+                    window.location.reload();
+                } else {
+                    alert('Error disconnecting: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error disconnecting:', error);
+                alert('Error disconnecting: ' + error.message);
+            }
         }
         
         // Cleanup on page unload

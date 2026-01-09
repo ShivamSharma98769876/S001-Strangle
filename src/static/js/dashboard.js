@@ -217,7 +217,9 @@ async function checkAuthStatus() {
         }
         
         const data = await response.json();
-        isAuthenticated = data.authenticated || false;
+        // CRITICAL: Only set as authenticated if explicitly authenticated (not just session exists)
+        // This prevents showing as connected when session exists from another machine
+        isAuthenticated = data.authenticated === true && data.has_access_token === true;
         updateAuthUI(isAuthenticated, data);
         
         if (isAuthenticated) {
@@ -240,10 +242,12 @@ function updateAuthUI(authenticated, authData = null) {
     const userInfo = document.getElementById('userInfo');
     const userName = document.getElementById('userName');
     const userId = document.getElementById('userId');
+    const disconnectBtn = document.getElementById('disconnectButton');
     
     if (authenticated) {
         if (authStatus) authStatus.style.display = 'none';
         if (userInfo) userInfo.style.display = 'flex';
+        if (disconnectBtn) disconnectBtn.style.display = 'inline-block';
         
         // Update user info with actual data
         if (authData) {
@@ -257,6 +261,7 @@ function updateAuthUI(authenticated, authData = null) {
     } else {
         if (authStatus) authStatus.style.display = 'block';
         if (userInfo) userInfo.style.display = 'none';
+        if (disconnectBtn) disconnectBtn.style.display = 'none';
         if (userName) userName.textContent = 'Loading...';
         if (userId) userId.textContent = '-';
     }
@@ -625,15 +630,88 @@ function formatDateTime(dateStr) {
     }
 }
 
+// Disconnect from Zerodha
+async function disconnectZerodha() {
+    if (!confirm('Are you sure you want to disconnect from Zerodha? This will clear all authentication credentials.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/auth/disconnect', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Update UI - set authentication state to false
+            isAuthenticated = false;
+            updateAuthUI(false);
+            
+            // Clear auth details display
+            const fields = ['authApiKey', 'authApiSecret', 'authAccessToken', 'authRequestToken', 
+                          'authEmail', 'authBroker', 'authUserId', 'authAccountName', 'authFullName'];
+            fields.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.textContent = '-';
+            });
+            
+            // Stop updates
+            stopUpdates();
+            
+            // Update status indicator
+            const statusIndicator = document.getElementById('statusIndicator');
+            const heartIcon = document.getElementById('heartIcon');
+            const statusText = document.getElementById('statusText');
+            if (heartIcon) {
+                heartIcon.classList.remove('connected');
+                heartIcon.classList.add('disconnected');
+            }
+            if (statusText) {
+                statusText.textContent = 'Not Connected';
+            }
+            
+            // Show auth status button
+            const authStatus = document.getElementById('authStatus');
+            if (authStatus) {
+                authStatus.style.display = 'block';
+                authStatus.textContent = '🔒 Not Authenticated';
+                authStatus.style.background = '#dc3545';
+                authStatus.onclick = showAuthModal;
+            }
+            
+            alert('Disconnected successfully. Please authenticate again to continue.');
+            
+            // Refresh page to reset state
+            window.location.reload();
+        } else {
+            alert('Error disconnecting: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error disconnecting:', error);
+        alert('Error disconnecting: ' + error.message);
+    }
+}
+
 // Initialize dashboard
 document.addEventListener('DOMContentLoaded', function() {
+    // Initialize with NOT authenticated state first
+    isAuthenticated = false;
+    updateAuthUI(false);
+    
     initializeCumulativePnlChart();
     initializePnlCalendar();
     setupEventListeners();
-    updateAuthDetails();
-    checkConnectivity();
-    checkAuthStatus();
-    updateCumulativePnl();
+    
+    // Check auth status after a small delay to ensure UI is ready
+    setTimeout(() => {
+        checkAuthStatus();
+    }, 100);
+    
+    // Don't check connectivity or update details until authenticated
+    // These will be called by checkAuthStatus if authenticated
 });
 
 // Cumulative P&L Chart - Radial Bar Chart (Spiral-like)

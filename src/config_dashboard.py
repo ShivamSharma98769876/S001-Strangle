@@ -204,16 +204,38 @@ logger.info("[DASHBOARD] Dashboard application initialized")
 
 # Authentication decorator for routes that require JWT token
 def require_authentication(f):
-    """Decorator to require authentication for API routes"""
+    """Decorator to require authentication for API routes - STRICT on cloud environments"""
     from functools import wraps
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not SaaSSessionManager.is_authenticated():
-            return jsonify({
-                'success': False,
-                'error': 'JWT token not associated. Please navigate through main application to authenticate.',
-                'requires_auth': True
-            }), 401
+        # On cloud/production, enforce strict authentication
+        if IS_PRODUCTION:
+            # Double-check authentication is valid
+            if not SaaSSessionManager.is_authenticated():
+                logging.warning(f"[AUTH] Unauthorized API access attempt to {request.path} from {request.remote_addr} on cloud environment")
+                return jsonify({
+                    'success': False,
+                    'error': 'Authentication required. This API endpoint is protected and requires JWT token authentication.',
+                    'requires_auth': True
+                }), 401
+            
+            # Additional check: ensure access token exists in session
+            creds = SaaSSessionManager.get_credentials()
+            if not creds.get('access_token'):
+                logging.warning(f"[AUTH] Missing access token for API {request.path} from {request.remote_addr} on cloud environment")
+                return jsonify({
+                    'success': False,
+                    'error': 'Invalid session. Access token not found. Please re-authenticate.',
+                    'requires_auth': True
+                }), 401
+        else:
+            # Local environment - still check but less strict
+            if not SaaSSessionManager.is_authenticated():
+                return jsonify({
+                    'success': False,
+                    'error': 'JWT token not associated. Please navigate through main application to authenticate.',
+                    'requires_auth': True
+                }), 401
         return f(*args, **kwargs)
     return decorated_function
 
@@ -265,7 +287,43 @@ def admin_panel():
 # Session management: Extend session on each request
 @app.before_request
 def check_session_expiration():
-    """Check and extend session on each request"""
+    """Check and extend session on each request, enforce authentication on cloud for protected routes"""
+    # List of routes that require authentication (especially on cloud)
+    protected_routes = ['/live/', '/admin/panel', '/api/live-trader/', '/api/strategy/', '/api/trading/']
+    
+    # Check if this is a protected route
+    is_protected = any(request.path.startswith(route) for route in protected_routes)
+    
+    # On cloud/production, strictly enforce authentication for protected routes
+    if IS_PRODUCTION and is_protected:
+        if not SaaSSessionManager.is_authenticated():
+            logging.warning(f"[AUTH] Unauthorized access attempt to protected route {request.path} from {request.remote_addr} on cloud")
+            # Return JSON for API routes, HTML for page routes
+            if request.path.startswith('/api/'):
+                return jsonify({
+                    'success': False,
+                    'error': 'Authentication required. This endpoint is protected and requires JWT token authentication.',
+                    'requires_auth': True
+                }), 401
+            else:
+                return render_template('auth_required.html', 
+                                     message='Authentication required. This page is protected and requires JWT token authentication. Please authenticate through the main application.'), 401
+        
+        # Additional check: ensure access token exists
+        creds = SaaSSessionManager.get_credentials()
+        if not creds.get('access_token'):
+            logging.warning(f"[AUTH] Missing access token for protected route {request.path} from {request.remote_addr} on cloud")
+            if request.path.startswith('/api/'):
+                return jsonify({
+                    'success': False,
+                    'error': 'Invalid session. Access token not found. Please re-authenticate.',
+                    'requires_auth': True
+                }), 401
+            else:
+                return render_template('auth_required.html', 
+                                     message='Invalid session. Access token not found. Please re-authenticate through the main application.'), 401
+    
+    # Extend session on activity if authenticated
     if SaaSSessionManager.is_authenticated():
         # Extend session on activity
         SaaSSessionManager.extend_session()
@@ -1357,9 +1415,17 @@ def start_strategy():
 @app.route('/live/', methods=['GET'], strict_slashes=False)
 @require_authentication_page
 def live_trader_page():
-    """Live Trader dedicated page - Requires authentication"""
+    """Live Trader dedicated page - Requires authentication (STRICT on cloud)"""
     try:
-        # Verify authentication
+        # Additional strict check for cloud environments
+        if IS_PRODUCTION:
+            creds = SaaSSessionManager.get_credentials()
+            if not creds.get('access_token'):
+                logging.warning(f"[LIVE TRADER] Unauthorized access attempt from {request.remote_addr} on cloud - missing access token")
+                return render_template('auth_required.html', 
+                                     message='Authentication required. Access token not found. Please authenticate through the main application.'), 401
+        
+        # Verify authentication (decorator already checks, but double-check here)
         if not SaaSSessionManager.is_authenticated():
             return render_template('auth_required.html', 
                                  message='JWT token not associated. Please navigate through main application to authenticate.'), 401
@@ -2204,7 +2270,7 @@ def stop_strategy():
 # Authentication API Endpoints
 @app.route('/api/auth/status', methods=['GET'])
 def auth_status():
-    """Check authentication status (SaaS-compliant)"""
+    """Check authentication status (SaaS-compliant) - Only returns authenticated=True if access_token exists"""
     try:
         is_authenticated = SaaSSessionManager.is_authenticated()
         
@@ -2216,9 +2282,13 @@ def auth_status():
             })
         
         creds = SaaSSessionManager.get_credentials()
+        has_access_token = bool(creds.get('access_token'))
+        
+        # CRITICAL: Only return authenticated=True if access_token exists
+        # This prevents showing as connected when session exists but no valid token
         return jsonify({
-            'authenticated': True,
-            'has_access_token': bool(creds.get('access_token')),
+            'authenticated': has_access_token,  # Only true if access_token exists
+            'has_access_token': has_access_token,
             'user_id': creds.get('user_id'),
             'broker_id': creds.get('broker_id'),
             'device_id': creds.get('device_id'),
@@ -2279,6 +2349,58 @@ def logout():
         })
     except Exception as e:
         logger.error(f"[AUTH] Error during logout: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/auth/disconnect', methods=['POST'])
+def disconnect_zerodha():
+    """Disconnect from Zerodha account - clear credentials and invalidate session (SaaS-compliant)"""
+    try:
+        # Get user info before clearing
+        user_id = SaaSSessionManager.get_user_id()
+        broker_id = SaaSSessionManager.get_broker_id()
+        
+        # Clear server-side session (SaaS-compliant)
+        SaaSSessionManager.clear_credentials()
+        
+        # Clear global kite client
+        global kite_client_global, kite_api_key, kite_api_secret, account_holder_name, strategy_account_name
+        if kite_client_global:
+            try:
+                # Close any connections if needed
+                if hasattr(kite_client_global, 'kite'):
+                    kite_client_global.kite = None
+            except:
+                pass
+        kite_client_global = None
+        kite_api_key = None
+        kite_api_secret = None
+        account_holder_name = None
+        strategy_account_name = None
+        
+        # Clear stored tokens file
+        try:
+            if os.path.exists(TOKEN_STORAGE_FILE):
+                tokens = {}
+                with open(TOKEN_STORAGE_FILE, 'r') as f:
+                    tokens = json.load(f)
+                # Clear all tokens
+                tokens.clear()
+                with open(TOKEN_STORAGE_FILE, 'w') as f:
+                    json.dump(tokens, f, indent=2)
+        except Exception as e:
+            logger.warning(f"[DISCONNECT] Could not clear token file: {e}")
+        
+        logger.info(f"[AUTH] User disconnected from Zerodha account (user: {user_id}, broker: {broker_id})")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Disconnected successfully'
+        })
+    except Exception as e:
+        logger.error(f"[AUTH] Error during disconnect: {e}")
         return jsonify({
             'success': False,
             'error': str(e)
