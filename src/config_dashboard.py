@@ -164,16 +164,38 @@ def setup_dashboard_blob_logging():
         if is_azure_environment():
             # Try to get account name from saved token
             account_name_for_logging = None
-            if kite_api_key:
-                saved_token, saved_account_name = load_access_token(kite_api_key)
-                if saved_account_name:
-                    account_name_for_logging = saved_account_name
-                    print(f"[STARTUP] Using account name from saved token: {account_name_for_logging}")
+            
+            # Check if kite_api_key is defined (it might not be at startup)
+            try:
+                global kite_api_key
+                if kite_api_key:
+                    saved_token, saved_account_name = load_access_token(kite_api_key)
+                    if saved_account_name:
+                        account_name_for_logging = saved_account_name
+                        print(f"[STARTUP] Using account name from saved token: {account_name_for_logging}")
+            except (NameError, AttributeError):
+                # kite_api_key not defined yet, try to load from token file directly
+                try:
+                    if os.path.exists(TOKEN_STORAGE_FILE):
+                        with open(TOKEN_STORAGE_FILE, 'r') as f:
+                            tokens = json.load(f)
+                            # Get first account name from tokens
+                            for api_key, token_data in tokens.items():
+                                if isinstance(token_data, dict) and token_data.get('account_name'):
+                                    account_name_for_logging = token_data.get('account_name')
+                                    print(f"[STARTUP] Using account name from token file: {account_name_for_logging}")
+                                    break
+                except Exception as e:
+                    print(f"[STARTUP] Could not load account name from token file: {e}")
             
             # Also check global account_holder_name if available
-            if not account_name_for_logging and account_holder_name:
-                account_name_for_logging = account_holder_name
-                print(f"[STARTUP] Using account name from global variable: {account_name_for_logging}")
+            try:
+                global account_holder_name
+                if not account_name_for_logging and account_holder_name:
+                    account_name_for_logging = account_holder_name
+                    print(f"[STARTUP] Using account name from global variable: {account_name_for_logging}")
+            except (NameError, AttributeError):
+                pass
             
             print("[STARTUP] Azure environment detected - setting up Azure Blob Storage logging...")
             if account_name_for_logging:

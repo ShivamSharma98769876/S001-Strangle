@@ -304,7 +304,10 @@ async function checkConnectivity() {
 
 // Update all dashboard data
 async function updateAll() {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated) {
+        stopUpdates();
+        return;
+    }
     
     try {
         await Promise.all([
@@ -314,16 +317,35 @@ async function updateAll() {
         ]);
     } catch (error) {
         console.error('Error updating dashboard:', error);
+        // If authentication error, stop updates
+        if (error.message && (error.message.includes('401') || error.message.includes('Unauthorized'))) {
+            isAuthenticated = false;
+            updateAuthUI(false);
+            stopUpdates();
+        }
     }
 }
 
 // Update status
 async function updateStatus() {
+    // Don't update if not authenticated
+    if (!isAuthenticated) {
+        return;
+    }
+    
     try {
         const response = await fetch('/api/dashboard/status', {
             credentials: 'include'
         });
-        if (!response.ok) return;
+        if (!response.ok) {
+            if (response.status === 401) {
+                // Not authenticated, stop updates
+                isAuthenticated = false;
+                updateAuthUI(false);
+                stopUpdates();
+            }
+            return;
+        }
         
         const data = await response.json();
         if (data.daily_loss_used !== undefined) {
@@ -340,6 +362,12 @@ async function updateStatus() {
         }
     } catch (error) {
         console.error('Error updating status:', error);
+        // If it's a JSON parse error, it might be a 401 response
+        if (error.message && error.message.includes('JSON')) {
+            isAuthenticated = false;
+            updateAuthUI(false);
+            stopUpdates();
+        }
     }
 }
 
@@ -425,11 +453,24 @@ function updateTradeSummary(trades) {
 
 // Update cumulative P&L
 async function updateCumulativePnl() {
+    // Don't update if not authenticated
+    if (!isAuthenticated) {
+        return;
+    }
+    
     try {
         const response = await fetch('/api/dashboard/cumulative-pnl', {
             credentials: 'include'
         });
-        if (!response.ok) return;
+        if (!response.ok) {
+            if (response.status === 401) {
+                // Not authenticated, stop updates
+                isAuthenticated = false;
+                updateAuthUI(false);
+                stopUpdates();
+            }
+            return;
+        }
         
         const data = await response.json();
         if (data.success) {
@@ -438,6 +479,12 @@ async function updateCumulativePnl() {
         }
     } catch (error) {
         console.error('Error updating cumulative P&L:', error);
+        // If it's a JSON parse error, it might be a 401 response
+        if (error.message && error.message.includes('JSON')) {
+            isAuthenticated = false;
+            updateAuthUI(false);
+            stopUpdates();
+        }
     }
 }
 
@@ -865,7 +912,7 @@ function drawRadialBarChart() {
     
     // Draw today's P&L in the center
     const todayPnl = cumulativePnlData.todayPnl || cumulativePnlData.day || 0;
-    const todayPnlFormatted = formatCurrency(todayPnl);
+    const todayPnlFormatted = formatCurrencyCompact(todayPnl);
     const isProfit = todayPnl >= 0;
     
     ctx.save();
@@ -877,7 +924,8 @@ function drawRadialBarChart() {
     ctx.restore();
 }
 
-function formatCurrency(value) {
+// Format currency for chart display (compact format)
+function formatCurrencyCompact(value) {
     if (value >= 100000) {
         return '₹' + (value / 100000).toFixed(2) + 'L';
     } else if (value >= 1000) {
@@ -889,6 +937,11 @@ function formatCurrency(value) {
 
 // Update cumulative P&L from API
 async function updateCumulativePnl() {
+    // Don't update if not authenticated
+    if (!isAuthenticated) {
+        return;
+    }
+    
     try {
         const response = await fetch('/api/dashboard/cumulative-pnl', {
             credentials: 'include'
@@ -915,9 +968,20 @@ async function updateCumulativePnl() {
                 // Redraw chart
                 drawRadialBarChart();
             }
+        } else if (response.status === 401) {
+            // Not authenticated, stop updates
+            isAuthenticated = false;
+            updateAuthUI(false);
+            stopUpdates();
         }
     } catch (error) {
         console.error('Error updating cumulative P&L:', error);
+        // If it's a JSON parse error, it might be a 401 response
+        if (error.message && (error.message.includes('JSON') || error.message.includes('401'))) {
+            isAuthenticated = false;
+            updateAuthUI(false);
+            stopUpdates();
+        }
     }
 }
 
@@ -1640,10 +1704,31 @@ function setupEventListeners() {
 
 // Helper function to safely parse JSON responses
 async function safeJsonResponse(response) {
+    // Handle 401 Unauthorized
+    if (response.status === 401) {
+        isAuthenticated = false;
+        updateAuthUI(false);
+        stopUpdates();
+        const text = await response.text();
+        try {
+            return JSON.parse(text);
+        } catch {
+            throw new Error('Unauthorized: Please authenticate to continue');
+        }
+    }
+    
     const contentType = response.headers.get('content-type');
     if (!contentType || !contentType.includes('application/json')) {
         const text = await response.text();
         throw new Error(`Server returned ${response.status} ${response.statusText}. Expected JSON but got ${contentType || 'unknown'}`);
     }
-    return await response.json();
+    
+    try {
+        return await response.json();
+    } catch (error) {
+        // If JSON parsing fails, it might be an error response
+        const text = await response.text();
+        console.error('Failed to parse JSON response:', text);
+        throw new Error(`Failed to parse response: ${error.message}`);
+    }
 }
