@@ -136,6 +136,8 @@ async function authenticateWithAccessToken(event) {
         if (data.success) {
             hideAuthModal();
             await checkAuthStatus();
+            // Update auth details after successful authentication
+            await updateAuthDetails();
             if (typeof addNotification === 'function') {
                 addNotification('Successfully authenticated', 'success');
             }
@@ -171,8 +173,6 @@ async function authenticateWithRequestToken(event) {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             credentials: 'include',
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 api_key: apiKey,
                 api_secret: apiSecret,
@@ -186,6 +186,8 @@ async function authenticateWithRequestToken(event) {
             accessTokenDisplay.style.display = 'block';
             hideAuthModal();
             await checkAuthStatus();
+            // Update auth details after successful authentication
+            await updateAuthDetails();
             if (typeof addNotification === 'function') {
                 addNotification('Access token generated and saved', 'success');
             }
@@ -216,9 +218,11 @@ async function checkAuthStatus() {
         
         const data = await response.json();
         isAuthenticated = data.authenticated || false;
-        updateAuthUI(isAuthenticated);
+        updateAuthUI(isAuthenticated, data);
         
         if (isAuthenticated) {
+            // Update auth details when authenticated
+            await updateAuthDetails();
             startUpdates();
         } else {
             stopUpdates();
@@ -231,16 +235,30 @@ async function checkAuthStatus() {
 }
 
 // Update authentication UI
-function updateAuthUI(authenticated) {
+function updateAuthUI(authenticated, authData = null) {
     const authStatus = document.getElementById('authStatus');
     const userInfo = document.getElementById('userInfo');
+    const userName = document.getElementById('userName');
+    const userId = document.getElementById('userId');
     
     if (authenticated) {
         if (authStatus) authStatus.style.display = 'none';
-        if (userInfo) userInfo.style.display = 'block';
+        if (userInfo) userInfo.style.display = 'flex';
+        
+        // Update user info with actual data
+        if (authData) {
+            if (userName) {
+                userName.textContent = authData.account_name || authData.full_name || authData.email || authData.user_id || 'User';
+            }
+            if (userId) {
+                userId.textContent = authData.user_id || authData.broker_id || '-';
+            }
+        }
     } else {
         if (authStatus) authStatus.style.display = 'block';
         if (userInfo) userInfo.style.display = 'none';
+        if (userName) userName.textContent = 'Loading...';
+        if (userId) userId.textContent = '-';
     }
 }
 
@@ -535,6 +553,8 @@ function toggleAuthDetails() {
         } else {
             widget.classList.add('expanded');
             content.style.display = 'block';
+            // Load and populate auth details when expanding
+            updateAuthDetails();
         }
     }
 }
@@ -550,15 +570,32 @@ async function updateAuthDetails() {
         const data = await response.json();
         if (data.success && data.details) {
             const details = data.details;
+            // Show actual values for reference (user requested to see credentials)
             document.getElementById('authApiKey').textContent = details.api_key || '-';
-            document.getElementById('authApiSecret').textContent = details.api_secret ? '••••••••' : '-';
-            document.getElementById('authAccessToken').textContent = details.access_token ? '••••••••' : '-';
+            document.getElementById('authApiSecret').textContent = details.api_secret || '-';
+            document.getElementById('authAccessToken').textContent = details.access_token || '-';
             document.getElementById('authRequestToken').textContent = details.request_token || '-';
             document.getElementById('authEmail').textContent = details.email || '-';
             document.getElementById('authBroker').textContent = details.broker || '-';
             document.getElementById('authUserId').textContent = details.user_id || '-';
             document.getElementById('authAccountName').textContent = details.account_name || '-';
             document.getElementById('authFullName').textContent = details.full_name || '-';
+        } else {
+            // If no details, try to get from auth status
+            const statusResponse = await fetch('/api/auth/status', {
+                credentials: 'include'
+            });
+            if (statusResponse.ok) {
+                const statusData = await statusResponse.json();
+                if (statusData.authenticated) {
+                    // At least show what we have from status
+                    document.getElementById('authUserId').textContent = statusData.user_id || '-';
+                    document.getElementById('authBroker').textContent = statusData.broker_id || '-';
+                    document.getElementById('authEmail').textContent = statusData.email || '-';
+                    document.getElementById('authAccountName').textContent = statusData.account_name || '-';
+                    document.getElementById('authFullName').textContent = statusData.full_name || '-';
+                }
+            }
         }
     } catch (error) {
         console.error('Error updating auth details:', error);

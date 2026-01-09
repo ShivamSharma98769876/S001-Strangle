@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - Configuration</title>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-tertiary: #0f172a;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-tertiary: #64748b;
+            --border-color: #334155;
+            --card-shadow: rgba(0, 0, 0, 0.3);
+            --hover-bg: #475569;
+            --primary-color: #3b82f6;
+            --success-color: #10b981;
+            --danger-color: #ef4444;
+            --warning-color: #f59e0b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 24px;
+            line-height: 1.6;
+        }
+
+        .admin-container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .admin-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            margin-bottom: 24px;
+            padding: 24px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+        }
+
+        .admin-header-content {
+            flex: 1;
+        }
+
+        .admin-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: linear-gradient(135deg, var(--primary-color) 0%, #2563eb 100%);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+
+        .admin-title {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .admin-title i {
+            color: var(--primary-color);
+            font-size: 24px;
+        }
+
+        .admin-subtitle {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-top: 4px;
+        }
+
+        .admin-subtitle code {
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: var(--primary-color);
+            border: 1px solid var(--border-color);
+        }
+
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--primary-color);
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 14px;
+            padding: 10px 16px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .back-link:hover {
+            background: var(--hover-bg);
+            border-color: var(--primary-color);
+            transform: translateX(-2px);
+        }
+
+        .admin-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 0;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--bg-secondary);
+        }
+
+        thead {
+            background: var(--bg-tertiary);
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        thead th {
+            padding: 16px 20px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        thead th:first-child {
+            padding-left: 24px;
+        }
+
+        thead th:last-child {
+            padding-right: 24px;
+        }
+
+        tbody tr {
+            border-bottom: 1px solid var(--border-color);
+            transition: all 0.2s ease;
+        }
+
+        tbody tr:hover {
+            background: var(--bg-tertiary);
+        }
+
+        tbody tr:last-child {
+            border-bottom: none;
+        }
+
+        td {
+            padding: 16px 20px;
+            vertical-align: top;
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+
+        td:first-child {
+            padding-left: 24px;
+        }
+
+        td:last-child {
+            padding-right: 24px;
+        }
+
+        .config-name {
+            font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', 'Menlo', monospace;
+            color: var(--primary-color);
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .config-type {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--warning-color);
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .config-value {
+            margin: 0;
+        }
+
+        .config-value pre {
+            white-space: pre-wrap;
+            word-break: break-word;
+            margin: 0;
+            font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', 'Menlo', monospace;
+            color: var(--text-primary);
+            font-size: 13px;
+            line-height: 1.6;
+            padding: 8px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 48px 24px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state i {
+            font-size: 48px;
+            color: var(--text-tertiary);
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .stats-bar {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+
+        .stat-card {
+            flex: 1;
+            min-width: 200px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        @media (max-width: 768px) {
+            .admin-header {
+                flex-direction: column;
+                gap: 16px;
+            }
+
+            .back-link {
+                width: 100%;
+                justify-content: center;
+            }
+
+            table {
+                font-size: 12px;
+            }
+
+            th, td {
+                padding: 12px 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-container">
+        <div class="admin-header">
+            <div class="admin-header-content">
+                <div class="admin-badge">
+                    <i class="fas fa-shield-alt"></i>
+                    Admin Panel
+                </div>
+                <div class="admin-title">
+                    <i class="fas fa-cog"></i>
+                    Configuration Parameters
+                </div>
+                <div class="admin-subtitle">
+                    All constants from <code>config.py</code> currently loaded by the application
+                </div>
+            </div>
+            <a href="/" class="back-link">
+                <i class="fas fa-arrow-left"></i>
+                Back to Dashboard
+            </a>
+        </div>
+
+        {% if config_items %}
+        <div class="stats-bar">
+            <div class="stat-card">
+                <div class="stat-label">
+                    <i class="fas fa-list-alt" style="margin-right: 6px;"></i>
+                    Total Parameters
+                </div>
+                <div class="stat-value">{{ config_items|length }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">
+                    <i class="fas fa-check-circle" style="margin-right: 6px;"></i>
+                    Status
+                </div>
+                <div class="stat-value" style="font-size: 16px; color: var(--success-color);">
+                    <i class="fas fa-circle" style="font-size: 8px; margin-right: 6px;"></i>
+                    Active
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="admin-card">
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 30%;">
+                                <i class="fas fa-tag" style="margin-right: 8px;"></i>
+                                Parameter Name
+                            </th>
+                            <th style="width: 15%;">
+                                <i class="fas fa-code" style="margin-right: 8px;"></i>
+                                Type
+                            </th>
+                            <th>
+                                <i class="fas fa-list" style="margin-right: 8px;"></i>
+                                Value
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if config_items %}
+                            {% for item in config_items %}
+                                <tr>
+                                    <td>
+                                        <div class="config-name">{{ item.name }}</div>
+                                    </td>
+                                    <td>
+                                        <span class="config-type">{{ item.type }}</span>
+                                    </td>
+                                    <td>
+                                        <div class="config-value">
+                                            <pre>{{ item.value }}</pre>
+                                        </div>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="3">
+                                    <div class="empty-state">
+                                        <i class="fas fa-exclamation-triangle"></i>
+                                        <div>No configuration data available.</div>
+                                        <div style="margin-top: 8px; font-size: 12px; color: var(--text-tertiary);">
+                                            Please ensure the config module is properly loaded.
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

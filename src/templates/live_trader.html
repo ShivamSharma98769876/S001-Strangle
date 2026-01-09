@@ -267,6 +267,168 @@
             font-size: 12px;
         }
 
+        /* Trading Configuration Table */
+        .trading-config-table-container {
+            margin-bottom: 24px;
+            background: transparent;
+            border-radius: 12px;
+            padding: 0;
+        }
+
+        .trading-config-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            background: transparent;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        .trading-config-table thead {
+            background: #e0e0e0;
+        }
+
+        .trading-config-table th {
+            padding: 14px 18px;
+            text-align: left;
+            font-size: 13px;
+            font-weight: 700;
+            color: #1e293b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border: none;
+            border-right: 1px solid #c0c0c0;
+        }
+
+        .trading-config-table th:first-child {
+            border-left: none;
+            width: 100px;
+        }
+
+        .trading-config-table th:last-child {
+            border-right: none;
+        }
+
+        .trading-config-table tbody tr {
+            background: transparent;
+            transition: background-color 0.2s ease;
+        }
+
+        .trading-config-table tbody tr:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .trading-config-table tbody tr:not(:last-child) {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .trading-config-table td {
+            padding: 16px 18px;
+            border: none;
+            font-size: 14px;
+            vertical-align: middle;
+        }
+
+        .trading-config-table .option-label {
+            background: #ffffff;
+            color: #1e293b;
+            font-weight: 700;
+            text-align: left;
+            font-size: 15px;
+            padding: 16px 20px;
+            border-right: 1px solid #e0e0e0;
+        }
+
+        .trading-config-table .lot-size-cell {
+            background: #e0e0e0;
+            padding: 12px 18px;
+            border-right: 1px solid #c0c0c0;
+        }
+
+        .trading-config-table .lot-quantity-cell {
+            background: #ffffff;
+            padding: 12px 18px;
+            border-right: 1px solid #e0e0e0;
+        }
+
+        .trading-config-table .total-quantity-cell {
+            background: #e0e0e0;
+            padding: 12px 18px;
+        }
+
+        .trading-config-table .lot-size-input {
+            width: 100%;
+            padding: 10px 14px;
+            background: #ffffff;
+            border: 1px solid #d0d0d0;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: 600;
+            color: #1e293b;
+            cursor: not-allowed;
+            text-align: center;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+
+        .trading-config-table .lot-size-input:hover {
+            border-color: #b0b0b0;
+        }
+
+        .trading-config-table .lot-quantity-input {
+            width: 100%;
+            padding: 10px 14px;
+            background: #ffffff;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: 600;
+            color: #1e293b;
+            text-align: center;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+
+        .trading-config-table .lot-quantity-input::placeholder {
+            color: #94a3b8;
+            font-weight: 400;
+            opacity: 0.7;
+        }
+
+        .trading-config-table .lot-quantity-input:hover {
+            border-color: var(--primary-color);
+            box-shadow: 0 2px 4px rgba(59, 130, 246, 0.15);
+            transform: translateY(-1px);
+        }
+
+        .trading-config-table .lot-quantity-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+            background: #f8faff;
+            transform: translateY(0);
+        }
+
+        .trading-config-table .total-quantity-value {
+            display: flex;
+            width: 100%;
+            padding: 10px 14px;
+            background: #ffffff;
+            border: 1px solid #d0d0d0;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: 700;
+            color: #1e293b;
+            text-align: center;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+            min-height: 38px;
+            line-height: 1.4;
+            align-items: center;
+            justify-content: center;
+        }
+
         .pyramiding-config {
             background: var(--bg-color);
             padding: 16px;
@@ -409,6 +571,45 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+
+        /* Responsive Design for Trading Table */
+        @media (max-width: 768px) {
+            .trading-config-table-container {
+                overflow-x: auto;
+            }
+
+            .trading-config-table {
+                min-width: 600px;
+            }
+
+            .trading-config-table th,
+            .trading-config-table td {
+                padding: 12px 14px;
+                font-size: 13px;
+            }
+
+            .trading-config-table .lot-size-input,
+            .trading-config-table .lot-quantity-input,
+            .trading-config-table .total-quantity-value {
+                padding: 8px 10px;
+                font-size: 14px;
+            }
+        }
+
+        /* Enhanced visual feedback */
+        .trading-config-table .lot-quantity-input:invalid {
+            border-color: var(--danger-color);
+        }
+
+        .trading-config-table .lot-quantity-input:valid {
+            border-color: #10b981;
+        }
+
+        /* Smooth transitions for all interactive elements */
+        .trading-config-table input,
+        .trading-config-table .total-quantity-value {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
     </style>
 </head>
 <body>
@@ -478,16 +679,56 @@
                 </div>
                 
                 <form id="liveTraderForm">
-                    <div class="form-group">
-                        <label for="callQuantity">Call Quantity</label>
-                        <input type="number" id="callQuantity" name="callQuantity" min="75" value="150" step="75" required>
-                        <small>Number of call options to trade (must be multiple of lot size - will be updated from config)</small>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="putQuantity">Put Quantity</label>
-                        <input type="number" id="putQuantity" name="putQuantity" min="75" value="150" step="75" required>
-                        <small>Number of put options to trade (must be multiple of lot size - will be updated from config)</small>
+                    <div class="trading-config-table-container">
+                        <table class="trading-config-table">
+                            <thead>
+                                <tr>
+                                    <th></th>
+                                    <th>Lot Size</th>
+                                    <th>Lot Quantity</th>
+                                    <th>Total Quantity</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td class="option-label">Call</td>
+                                    <td class="lot-size-cell">
+                                        <input type="number" id="callLotSize" readonly value="75" class="lot-size-input">
+                                    </td>
+                                    <td class="lot-quantity-cell">
+                                        <input type="number" id="callLots" name="callLots" placeholder="Enter lots" min="1" value="1" step="1" required class="lot-quantity-input">
+                                    </td>
+                                    <td class="total-quantity-cell">
+                                        <span id="callQuantityDisplay" class="total-quantity-value">75</span>
+                                        <input type="hidden" id="callQuantityHidden" value="75">
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="option-label">Put</td>
+                                    <td class="lot-size-cell">
+                                        <input type="number" id="putLotSize" readonly value="75" class="lot-size-input">
+                                    </td>
+                                    <td class="lot-quantity-cell">
+                                        <input type="number" id="putLots" name="putLots" placeholder="Enter lots" min="1" value="1" step="1" required class="lot-quantity-input">
+                                    </td>
+                                    <td class="total-quantity-cell">
+                                        <span id="putQuantityDisplay" class="total-quantity-value">75</span>
+                                        <input type="hidden" id="putQuantityHidden" value="75">
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <!-- Hidden elements for formula display (kept for JS compatibility) -->
+                        <div style="display: none;">
+                            <span id="callLotSizeDisplay">75</span>
+                            <span id="callLotsDisplay">1</span>
+                            <span id="callQuantityResult">75</span>
+                            <div id="callQuantityFormula"></div>
+                            <span id="putLotSizeDisplay">75</span>
+                            <span id="putLotsDisplay">1</span>
+                            <span id="putQuantityResult">75</span>
+                            <div id="putQuantityFormula"></div>
+                        </div>
                     </div>
 
                     <!-- Pyramiding Configuration (Miniature) -->
@@ -567,6 +808,60 @@
         let autoScrollEnabled = true; // Tail mode: always auto-scroll to bottom when new logs arrive
         let userScrolledUp = false; // Track if user manually scrolled up
 
+        // Calculate and update quantity display
+        function updateQuantityDisplay() {
+            const callLotSizeInput = document.getElementById('callLotSize');
+            const callLotsInput = document.getElementById('callLots');
+            const callQuantityDisplay = document.getElementById('callQuantityDisplay');
+            const callLotSizeDisplay = document.getElementById('callLotSizeDisplay');
+            const callLotsDisplay = document.getElementById('callLotsDisplay');
+            const callQuantityResult = document.getElementById('callQuantityResult');
+            
+            const putLotSizeInput = document.getElementById('putLotSize');
+            const putLotsInput = document.getElementById('putLots');
+            const putQuantityDisplay = document.getElementById('putQuantityDisplay');
+            const putLotSizeDisplay = document.getElementById('putLotSizeDisplay');
+            const putLotsDisplay = document.getElementById('putLotsDisplay');
+            const putQuantityResult = document.getElementById('putQuantityResult');
+            
+            // Update Call Quantity
+            if (callLotSizeInput && callLotsInput && callQuantityDisplay) {
+                const lotSize = parseInt(callLotSizeInput.value) || lotSize;
+                const lots = parseInt(callLotsInput.value) || 0;
+                const quantity = lotSize * lots;
+                callQuantityDisplay.textContent = quantity || 0;
+                
+                // Update hidden input for form submission
+                const callQuantityHidden = document.getElementById('callQuantityHidden');
+                if (callQuantityHidden) callQuantityHidden.value = quantity || 0;
+                
+                // Update formula display
+                if (callLotSizeDisplay) callLotSizeDisplay.textContent = lotSize;
+                if (callLotsDisplay) callLotsDisplay.textContent = lots;
+                if (callQuantityResult) callQuantityResult.textContent = quantity || 0;
+            }
+            
+            // Update Put Quantity
+            if (putLotSizeInput && putLotsInput && putQuantityDisplay) {
+                const lotSize = parseInt(putLotSizeInput.value) || lotSize;
+                const lots = parseInt(putLotsInput.value) || 0;
+                const quantity = lotSize * lots;
+                putQuantityDisplay.textContent = quantity || 0;
+                
+                // Update hidden input for form submission
+                const putQuantityHidden = document.getElementById('putQuantityHidden');
+                if (putQuantityHidden) putQuantityHidden.value = quantity || 0;
+                
+                // Update formula display
+                if (putLotSizeDisplay) putLotSizeDisplay.textContent = lotSize;
+                if (putLotsDisplay) putLotsDisplay.textContent = lots;
+                if (putQuantityResult) putQuantityResult.textContent = quantity || 0;
+            }
+            
+            // Also update pyramiding config
+            updatePyramidingConfig();
+        }
+        
         // Fetch lot size from config
         async function fetchLotSize() {
             try {
@@ -575,33 +870,32 @@
                     const data = await response.json();
                     if (data.success) {
                         lotSize = data.lot_size;
-                        // Update input fields with lot size
-                        const callQtyInput = document.getElementById('callQuantity');
-                        const putQtyInput = document.getElementById('putQuantity');
-                        if (callQtyInput) {
-                            callQtyInput.min = lotSize;
-                            callQtyInput.step = lotSize;
-                            if (!callQtyInput.value || parseInt(callQtyInput.value) < lotSize) {
-                                callQtyInput.value = lotSize * 2; // Default to 2 lots
-                            }
-                            // Update help text
-                            const callQtySmall = callQtyInput.parentElement.querySelector('small');
-                            if (callQtySmall) {
-                                callQtySmall.textContent = `Number of call options to trade (must be multiple of ${lotSize}, e.g., ${lotSize}, ${lotSize * 2}, ${lotSize * 3}, ${lotSize * 4})`;
-                            }
+                        
+                        // Update lot size display fields
+                        const callLotSizeInput = document.getElementById('callLotSize');
+                        const putLotSizeInput = document.getElementById('putLotSize');
+                        if (callLotSizeInput) callLotSizeInput.value = lotSize;
+                        if (putLotSizeInput) putLotSizeInput.value = lotSize;
+                        
+                        // Update formula display lot sizes
+                        const callLotSizeDisplay = document.getElementById('callLotSizeDisplay');
+                        const putLotSizeDisplay = document.getElementById('putLotSizeDisplay');
+                        if (callLotSizeDisplay) callLotSizeDisplay.textContent = lotSize;
+                        if (putLotSizeDisplay) putLotSizeDisplay.textContent = lotSize;
+                        
+                        // Set default lots (2 lots)
+                        const callLotsInput = document.getElementById('callLots');
+                        const putLotsInput = document.getElementById('putLots');
+                        if (callLotsInput && !callLotsInput.value) {
+                            callLotsInput.value = 2;
                         }
-                        if (putQtyInput) {
-                            putQtyInput.min = lotSize;
-                            putQtyInput.step = lotSize;
-                            if (!putQtyInput.value || parseInt(putQtyInput.value) < lotSize) {
-                                putQtyInput.value = lotSize * 2; // Default to 2 lots
-                            }
-                            // Update help text
-                            const putQtySmall = putQtyInput.parentElement.querySelector('small');
-                            if (putQtySmall) {
-                                putQtySmall.textContent = `Number of put options to trade (must be multiple of ${lotSize}, e.g., ${lotSize}, ${lotSize * 2}, ${lotSize * 3}, ${lotSize * 4})`;
-                            }
+                        if (putLotsInput && !putLotsInput.value) {
+                            putLotsInput.value = 2;
                         }
+                        
+                        // Update quantity displays (this will also update formula displays)
+                        updateQuantityDisplay();
+                        
                         console.log(`[LOT SIZE] Loaded from config: ${lotSize}`);
                     }
                 }
@@ -623,9 +917,24 @@
                 startLiveTrader();
             });
 
-            // Update pyramiding config when quantities change
-            document.getElementById('callQuantity').addEventListener('input', updatePyramidingConfig);
-            document.getElementById('putQuantity').addEventListener('input', updatePyramidingConfig);
+            // Update quantity display when lots change
+            const callLotsInput = document.getElementById('callLots');
+            const putLotsInput = document.getElementById('putLots');
+            const callLotSizeInput = document.getElementById('callLotSize');
+            const putLotSizeInput = document.getElementById('putLotSize');
+            
+            if (callLotsInput) {
+                callLotsInput.addEventListener('input', updateQuantityDisplay);
+            }
+            if (putLotsInput) {
+                putLotsInput.addEventListener('input', updateQuantityDisplay);
+            }
+            if (callLotSizeInput) {
+                callLotSizeInput.addEventListener('change', updateQuantityDisplay);
+            }
+            if (putLotSizeInput) {
+                putLotSizeInput.addEventListener('change', updateQuantityDisplay);
+            }
 
             // Auto-refresh status every 5 seconds
             setInterval(checkStatus, 5000);
@@ -635,8 +944,10 @@
         });
 
         function updatePyramidingConfig() {
-            const callQty = document.getElementById('callQuantity').value;
-            const putQty = document.getElementById('putQuantity').value;
+            const callQuantityHidden = document.getElementById('callQuantityHidden');
+            const putQuantityHidden = document.getElementById('putQuantityHidden');
+            const callQty = callQuantityHidden ? callQuantityHidden.value : '0';
+            const putQty = putQuantityHidden ? putQuantityHidden.value : '0';
             document.getElementById('pyramidingCallQty').textContent = callQty || '50';
             document.getElementById('pyramidingPutQty').textContent = putQty || '50';
         }
@@ -806,36 +1117,44 @@
                 console.error('[START] Error checking status before start:', error);
             }
             
-            const callQuantity = parseInt(document.getElementById('callQuantity').value);
-            const putQuantity = parseInt(document.getElementById('putQuantity').value);
+            // Get calculated quantities from hidden input fields
+            const callQuantityHidden = document.getElementById('callQuantityHidden');
+            const putQuantityHidden = document.getElementById('putQuantityHidden');
+            const callLotsInput = document.getElementById('callLots');
+            const putLotsInput = document.getElementById('putLots');
+            
+            const callQuantity = parseInt(callQuantityHidden ? callQuantityHidden.value : 0);
+            const putQuantity = parseInt(putQuantityHidden ? putQuantityHidden.value : 0);
             const errorEl = document.getElementById('errorMessage');
             const startBtn = document.getElementById('startBtn');
             const stopBtn = document.getElementById('stopBtn');
 
+            if (!callLotsInput || !callLotsInput.value || parseInt(callLotsInput.value) <= 0) {
+                errorEl.textContent = 'Please enter a valid number of Call Lots';
+                errorEl.classList.add('show');
+                return;
+            }
+            
+            if (!putLotsInput || !putLotsInput.value || parseInt(putLotsInput.value) <= 0) {
+                errorEl.textContent = 'Please enter a valid number of Put Lots';
+                errorEl.classList.add('show');
+                return;
+            }
+            
             if (!callQuantity || callQuantity <= 0) {
-                errorEl.textContent = 'Please enter a valid Call Quantity';
+                errorEl.textContent = 'Call Quantity is invalid. Please check your lot size and lots.';
                 errorEl.classList.add('show');
                 return;
             }
-
+            
             if (!putQuantity || putQuantity <= 0) {
-                errorEl.textContent = 'Please enter a valid Put Quantity';
+                errorEl.textContent = 'Put Quantity is invalid. Please check your lot size and lots.';
                 errorEl.classList.add('show');
                 return;
             }
 
-            // Validate quantities are multiples of lot size (from config)
-            if (callQuantity % lotSize !== 0) {
-                errorEl.textContent = `Call Quantity must be a multiple of ${lotSize}. You entered ${callQuantity}. Nearest valid: ${Math.floor(callQuantity / lotSize) * lotSize}`;
-                errorEl.classList.add('show');
-                return;
-            }
-
-            if (putQuantity % lotSize !== 0) {
-                errorEl.textContent = `Put Quantity must be a multiple of ${lotSize}. You entered ${putQuantity}. Nearest valid: ${Math.floor(putQuantity / lotSize) * lotSize}`;
-                errorEl.classList.add('show');
-                return;
-            }
+            // Quantities are automatically calculated from lots, so no need to validate multiples
+            // The calculation ensures they're always multiples of lot size
 
             try {
                 errorEl.classList.remove('show');

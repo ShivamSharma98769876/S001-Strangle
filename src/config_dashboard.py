@@ -202,6 +202,66 @@ setup_dashboard_blob_logging()
 
 logger.info("[DASHBOARD] Dashboard application initialized")
 
+# Authentication decorator for routes that require JWT token
+def require_authentication(f):
+    """Decorator to require authentication for API routes"""
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not SaaSSessionManager.is_authenticated():
+            return jsonify({
+                'success': False,
+                'error': 'JWT token not associated. Please navigate through main application to authenticate.',
+                'requires_auth': True
+            }), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+def require_authentication_page(f):
+    """Decorator to require authentication for page routes"""
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not SaaSSessionManager.is_authenticated():
+            return render_template('auth_required.html', 
+                                 message='JWT token not associated. Please navigate through main application to authenticate.'), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+def _format_config_value(value):
+    """Convert config values to readable strings for display."""
+    try:
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, indent=2)
+        return str(value)
+    except Exception:
+        return "<unavailable>"
+
+@app.route('/admin/panel')
+@require_authentication_page
+def admin_panel():
+    """Simple admin page to view current config constants."""
+    config_items = []
+
+    # Use already-imported config module if available
+    config_module = globals().get('config')
+
+    if not config_module:
+        logger.error("[ADMIN] Config module not available; cannot render admin panel")
+    else:
+        for attr in sorted(a for a in dir(config_module) if a.isupper() and not a.startswith('_')):
+            value = getattr(config_module, attr, None)
+            config_items.append({
+                'name': attr,
+                'value': _format_config_value(value),
+                'type': type(value).__name__ if value is not None else 'unknown'
+            })
+
+    return render_template(
+        'admin_panel.html',
+        config_items=config_items
+    )
+
 # Session management: Extend session on each request
 @app.before_request
 def check_session_expiration():
@@ -378,6 +438,12 @@ def reconnect_kite_client():
         logging.error(f"[RECONNECT] Error during reconnection: {e}")
         kite_client_global = None
         return False
+
+@app.route('/favicon.ico')
+def favicon():
+    """Return empty favicon to prevent 404 errors"""
+    from flask import Response
+    return Response('', mimetype='image/x-icon')
 
 @app.route('/')
 def dashboard():
@@ -815,6 +881,7 @@ def get_trading_status():
 
 # New Dashboard API Endpoints
 @app.route('/api/dashboard/metrics')
+@require_authentication
 def get_dashboard_metrics():
     """Get Total Day P&L for trades with tag='S001'"""
     try:
@@ -883,6 +950,7 @@ def get_dashboard_metrics():
         }), 500
 
 @app.route('/api/dashboard/positions')
+@require_authentication
 def get_dashboard_positions():
     """Get all positions (active and inactive) for dashboard"""
     try:
@@ -935,6 +1003,7 @@ def get_dashboard_positions():
         }), 500
 
 @app.route('/api/dashboard/trade-history')
+@require_authentication
 def get_trade_history():
     """Get trade history from s001_trades database table"""
     try:
@@ -1055,6 +1124,7 @@ def get_trade_history():
         }), 500
 
 @app.route('/api/dashboard/cumulative-pnl')
+@require_authentication
 def get_cumulative_pnl():
     """Get cumulative P&L from s001_trades database table"""
     try:
@@ -1137,6 +1207,7 @@ def init_database():
         }), 500
 
 @app.route('/api/dashboard/status')
+@require_authentication
 def get_dashboard_status():
     """Get dashboard status including daily loss from s001_daily_stats"""
     try:
@@ -1174,6 +1245,7 @@ def get_dashboard_status():
         })
 
 @app.route('/api/dashboard/pnl-chart')
+@require_authentication
 def get_pnl_chart_data():
     """Get P&L chart data"""
     try:
@@ -1283,12 +1355,37 @@ def start_strategy():
         }), 500
 
 @app.route('/live/', methods=['GET'], strict_slashes=False)
+@require_authentication_page
 def live_trader_page():
-    """Live Trader dedicated page"""
+    """Live Trader dedicated page - Requires authentication"""
     try:
-        # Get account holder name if authenticated
-        global account_holder_name
-        account_name_display = account_holder_name if account_holder_name else None
+        # Verify authentication
+        if not SaaSSessionManager.is_authenticated():
+            return render_template('auth_required.html', 
+                                 message='JWT token not associated. Please navigate through main application to authenticate.'), 401
+        
+        # Get credentials from session
+        creds = SaaSSessionManager.get_credentials()
+        account_name_display = creds.get('full_name') or creds.get('account_name') or 'Trading Account'
+        
+        # Sync global variables from session
+        global account_holder_name, kite_api_key, kite_api_secret, kite_client_global
+        account_holder_name = account_name_display
+        kite_api_key = creds.get('api_key', '')
+        kite_api_secret = creds.get('api_secret', '')
+        
+        # Ensure kite_client_global is set if we have credentials
+        if creds.get('access_token') and kite_api_key and kite_api_secret and not kite_client_global:
+            try:
+                from src.kite_client import KiteClient
+            except ImportError:
+                from kite_client import KiteClient
+            kite_client_global = KiteClient(
+                kite_api_key,
+                kite_api_secret,
+                access_token=creds.get('access_token'),
+                account=account_name_display
+            )
         
         return render_template('live_trader.html', account_holder_name=account_name_display)
     except Exception as e:
@@ -1296,6 +1393,7 @@ def live_trader_page():
         return f"Error loading Live Trader page: {str(e)}", 500
 
 @app.route('/api/live-trader/logs', methods=['GET'])
+@require_authentication
 def get_live_trader_logs():
     """Get Live Trader logs"""
     try:
@@ -1607,6 +1705,7 @@ def get_live_trader_logs():
         }), 500
 
 @app.route('/api/live-trader/status', methods=['GET'])
+@require_authentication
 def live_trader_status():
     """Get Live Trader engine status"""
     try:
@@ -1659,10 +1758,29 @@ def live_trader_status():
         }), 500
 
 @app.route('/api/live-trader/start', methods=['POST'])
+@require_authentication
 def start_live_trader():
     """Start Live Trader by running Straddle10PointswithSL-Limit.py"""
     try:
         global strategy_process, strategy_running, kite_client_global, kite_api_key, kite_api_secret
+        
+        # CRITICAL: Load credentials from session first
+        creds = SaaSSessionManager.get_credentials()
+        if creds.get('api_key'):
+            kite_api_key = creds.get('api_key')
+        if creds.get('api_secret'):
+            kite_api_secret = creds.get('api_secret')
+        if creds.get('access_token') and not kite_client_global:
+            try:
+                from src.kite_client import KiteClient
+            except ImportError:
+                from kite_client import KiteClient
+            kite_client_global = KiteClient(
+                kite_api_key,
+                kite_api_secret,
+                access_token=creds.get('access_token'),
+                account=creds.get('full_name', 'DASHBOARD')
+            )
         
         # Check if process is actually running, not just the flag
         if strategy_running:
@@ -1719,6 +1837,24 @@ def start_live_trader():
                 'error': f'Put Quantity must be a multiple of {LOT_SIZE}. You entered {put_quantity}. Nearest valid: {(put_quantity // LOT_SIZE) * LOT_SIZE}'
             }), 400
         
+        # CRITICAL: Load credentials from session first (in case global client is not set)
+        creds = SaaSSessionManager.get_credentials()
+        if creds.get('api_key'):
+            kite_api_key = creds.get('api_key')
+        if creds.get('api_secret'):
+            kite_api_secret = creds.get('api_secret')
+        if creds.get('access_token') and not kite_client_global:
+            try:
+                from src.kite_client import KiteClient
+            except ImportError:
+                from kite_client import KiteClient
+            kite_client_global = KiteClient(
+                kite_api_key,
+                kite_api_secret,
+                access_token=creds.get('access_token'),
+                account=creds.get('full_name', 'DASHBOARD')
+            )
+        
         # Check if authenticated
         if not kite_client_global or not hasattr(kite_client_global, 'kite'):
             return jsonify({
@@ -1727,10 +1863,10 @@ def start_live_trader():
             }), 401
         
         # Get credentials from authenticated client
-        api_key = kite_client_global.api_key
+        api_key = kite_client_global.api_key if kite_client_global else kite_api_key
         # Use api_secret from kite_client_global, but fall back to global kite_api_secret if empty
         api_secret = kite_client_global.api_secret or kite_api_secret or ''
-        access_token = kite_client_global.access_token
+        access_token = kite_client_global.access_token if kite_client_global else creds.get('access_token', '')
         
         # Log credential status for debugging
         logging.info(f"[LIVE TRADER] Credentials check - api_key: {'SET' if api_key else 'NOT SET'}, api_secret: {'SET' if api_secret else 'NOT SET'}, access_token: {'SET' if access_token else 'NOT SET'}")
@@ -2098,6 +2234,40 @@ def auth_status():
             'error': str(e)
         }), 500
 
+@app.route('/api/auth/details', methods=['GET'])
+def auth_details():
+    """Get authentication details for populating form fields"""
+    try:
+        is_authenticated = SaaSSessionManager.is_authenticated()
+        
+        if not is_authenticated:
+            return jsonify({
+                'success': True,
+                'details': {}
+            })
+        
+        creds = SaaSSessionManager.get_credentials()
+        return jsonify({
+            'success': True,
+            'details': {
+                'api_key': creds.get('api_key', ''),
+                'api_secret': creds.get('api_secret', ''),
+                'access_token': creds.get('access_token', ''),
+                'request_token': creds.get('request_token', ''),
+                'email': creds.get('email', ''),
+                'broker': creds.get('broker_id', ''),
+                'user_id': creds.get('user_id', ''),
+                'account_name': creds.get('full_name', '') or 'Trading Account',
+                'full_name': creds.get('full_name', '')
+            }
+        })
+    except Exception as e:
+        logging.error(f"[AUTH] Error getting auth details: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/api/auth/logout', methods=['POST'])
 def logout():
     """Logout and clear session credentials"""
@@ -2269,6 +2439,77 @@ def authenticate():
             'error': str(e)
         }), 500
 
+@app.route('/api/auth/generate-access-token', methods=['POST'])
+def generate_access_token():
+    """Generate access token from request token (alias for authenticate)"""
+    try:
+        data = request.get_json() or {}
+        request_token = data.get('request_token', '').strip()
+        api_key = data.get('api_key', '').strip()
+        api_secret = data.get('api_secret', '').strip()
+        
+        if not request_token:
+            return jsonify({
+                'success': False,
+                'error': 'Request token is required'
+            }), 400
+        
+        if not api_key or not api_secret:
+            return jsonify({
+                'success': False,
+                'error': 'API key and secret are required'
+            }), 400
+        
+        # Use the authenticate endpoint logic
+        try:
+            from src.kite_client import KiteClient
+        except ImportError:
+            from kite_client import KiteClient
+        
+        kite_client = KiteClient(
+            api_key,
+            api_secret,
+            request_token=request_token,
+            account='DASHBOARD'
+        )
+        
+        # Verify authentication
+        is_valid, result = validate_kite_connection(kite_client)
+        if not is_valid:
+            return jsonify({
+                'success': False,
+                'error': result
+            }), 401
+        
+        profile = result
+        user_id = profile.get('user_id') or profile.get('user_name') or api_key
+        broker_id = profile.get('user_id') or api_key
+        account_name = profile.get('user_name') or profile.get('user_id') or 'Trading Account'
+        
+        # Store credentials in session
+        SaaSSessionManager.store_credentials(
+            api_key=api_key,
+            api_secret=api_secret,
+            access_token=kite_client.access_token,
+            request_token=request_token,
+            user_id=user_id,
+            broker_id=broker_id,
+            email=profile.get('email'),
+            full_name=account_name
+        )
+        
+        return jsonify({
+            'success': True,
+            'access_token': kite_client.access_token,
+            'message': 'Access token generated successfully'
+        })
+    except Exception as e:
+        logger.error(f"[AUTH] Error generating access token: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'Failed to generate access token: {str(e)}'
+        }), 500
+
 @app.route('/api/auth/set-access-token', methods=['POST'])
 def set_access_token():
     """Set access token directly (if user already has one)"""
@@ -2397,11 +2638,40 @@ def set_access_token():
             'error': str(e)
         }), 500
 
+# Authentication decorator for routes that require JWT token
+def require_authentication(f):
+    """Decorator to require authentication for routes"""
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not SaaSSessionManager.is_authenticated():
+            return jsonify({
+                'success': False,
+                'error': 'JWT token not associated. Please navigate through main application to authenticate.',
+                'requires_auth': True
+            }), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+def require_authentication_page(f):
+    """Decorator to require authentication for page routes"""
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not SaaSSessionManager.is_authenticated():
+            return render_template('auth_required.html', 
+                                 message='JWT token not associated. Please navigate through main application to authenticate.'), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
 @app.route('/api/connectivity', methods=['GET'])
 def check_connectivity():
     """Check system connectivity status"""
     try:
         global strategy_bot, kite_client_global
+        
+        # CRITICAL: First check if user is authenticated via session
+        is_authenticated = SaaSSessionManager.is_authenticated()
         
         connectivity = {
             'connected': False,
@@ -2409,8 +2679,34 @@ def check_connectivity():
             'websocket_connected': False,
             'api_authenticated': False,
             'last_check': datetime.now().isoformat(),
-            'status_message': ''
+            'status_message': 'Not Authenticated'
         }
+        
+        # If not authenticated, return immediately
+        if not is_authenticated:
+            return jsonify(connectivity)
+        
+        # Try to load credentials from session and sync with global client
+        try:
+            creds = SaaSSessionManager.get_credentials()
+            if creds.get('access_token') and not kite_client_global:
+                # Try to recreate kite client from session credentials
+                global kite_api_key, kite_api_secret
+                kite_api_key = creds.get('api_key', '')
+                kite_api_secret = creds.get('api_secret', '')
+                if kite_api_key and kite_api_secret and creds.get('access_token'):
+                    try:
+                        from src.kite_client import KiteClient
+                    except ImportError:
+                        from kite_client import KiteClient
+                    kite_client_global = KiteClient(
+                        kite_api_key,
+                        kite_api_secret,
+                        access_token=creds.get('access_token'),
+                        account=creds.get('full_name', 'DASHBOARD')
+                    )
+        except Exception as e:
+            logging.warning(f"[CONNECTIVITY] Could not sync session credentials: {e}")
         
         # Check global kite client first
         if kite_client_global and hasattr(kite_client_global, 'kite'):

@@ -34,7 +34,7 @@ TARGET_DELTA_HIGH = 0.36  # Upper bound for target delta
 MAX_STOP_LOSS_TRIGGER = 6  # Max number of stop-loss triggers allowed
 
 # Lot Size Configuration
-LOT_SIZE = 75  # NIFTY options lot size - quantities must be multiples of this value
+LOT_SIZE = 65  # NIFTY options lot size - quantities must be multiples of this value
 
 # Expiry Configuration
 NIFTY_EXPIRY_DAY = 'Tuesday'  # Nifty 50 options expire on Tuesday
@@ -42,7 +42,7 @@ EXPIRY_DAY = NIFTY_EXPIRY_DAY  # Default expiry day for the underlying
 
 # Market Hours
 MARKET_START_TIME = time(9, 15)
-MARKET_END_TIME = time(14, 50)
+MARKET_END_TIME = time(23, 55)
 TRADING_START_TIME = time(9, 40)
 
 # Stop Loss Configuration by Day

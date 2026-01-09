@@ -2030,7 +2030,7 @@ def monitor_trades(call_order_id, put_order_id, call_strike, put_strike, call_sl
             # Save P&L before market close
             try:
                 if PnLRecorder is not None:
-                    pnl_recorder = PnLRecorder()
+                    pnl_recorder = PnLRecorder(account=account)
                     pnl_recorder.save_daily_pnl(kite, account)
                     logging.info("[MARKET CLOSE] Daily P&L saved successfully")
                 else:
@@ -2655,10 +2655,10 @@ def main():
     kite = KiteConnect(api_key=api_key)
     kite.set_access_token(request_token)
     
-    # Initialize P&L Recorder
+    # Initialize P&L Recorder (account-wise)
     if PnLRecorder is not None:
-        pnl_recorder = PnLRecorder()
-        logging.info("[P&L RECORDER] Initialized - will save daily P&L before market close")
+        pnl_recorder = PnLRecorder(account=account)
+        logging.info(f"[P&L RECORDER] Initialized for account '{account}' - will save daily P&L before market close")
     else:
         logging.warning("[P&L RECORDER] Not available - P&L recording will be disabled")
     
@@ -2822,7 +2822,7 @@ def main():
             # Save P&L before market close (in case no trades were taken)
             try:
                 if PnLRecorder is not None:
-                    pnl_recorder = PnLRecorder()
+                    pnl_recorder = PnLRecorder(account=account)
                     pnl_recorder.save_daily_pnl(kite, account)
                     logging.info("[MARKET CLOSE] Daily P&L saved successfully")
                 else:

@@ -13,17 +13,40 @@ from typing import Dict, List, Optional
 class PnLRecorder:
     """Records and manages daily P&L data"""
     
-    def __init__(self, data_dir: str = "pnl_data"):
+    def __init__(self, data_dir: str = "pnl_data", account: Optional[str] = None):
         """
         Initialize P&L Recorder
         
         Args:
             data_dir: Directory to store P&L data files
+            account: Account identifier for account-wise file storage
         """
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(exist_ok=True)
-        self.json_file = self.data_dir / "daily_pnl.json"
-        self.csv_file = self.data_dir / "daily_pnl.csv"
+        self.account = account or 'default'
+        # Sanitize account name for filename (remove special characters)
+        self.safe_account = self._sanitize_account_name(self.account)
+        self.json_file = self.data_dir / f"daily_pnl_{self.safe_account}.json"
+        self.csv_file = self.data_dir / f"daily_pnl_{self.safe_account}.csv"
+    
+    def _sanitize_account_name(self, account: str) -> str:
+        """
+        Sanitize account name for use in filenames
+        
+        Args:
+            account: Account identifier
+            
+        Returns:
+            Sanitized account name safe for filenames
+        """
+        # Replace special characters with underscores
+        import re
+        safe_name = re.sub(r'[^\w\-_]', '_', account)
+        # Remove multiple consecutive underscores
+        safe_name = re.sub(r'_+', '_', safe_name)
+        # Remove leading/trailing underscores
+        safe_name = safe_name.strip('_')
+        return safe_name or 'default'
         
     def get_non_equity_pnl(self, kite) -> Dict:
         """
@@ -102,16 +125,19 @@ class PnLRecorder:
     
     def save_daily_pnl(self, kite, account: Optional[str] = None) -> bool:
         """
-        Save today's P&L data to JSON and CSV files
+        Save today's P&L data to JSON and CSV files (account-wise)
         
         Args:
             kite: KiteConnect instance
-            account: Account identifier (optional)
+            account: Account identifier (optional, uses instance account if not provided)
             
         Returns:
             True if saved successfully, False otherwise
         """
         try:
+            # Use provided account or instance account
+            record_account = account or self.account
+            
             # Get P&L data
             pnl_data = self.get_non_equity_pnl(kite)
             
@@ -122,7 +148,7 @@ class PnLRecorder:
             daily_record = {
                 'date': today.isoformat(),
                 'timestamp': timestamp.isoformat(),
-                'account': account or 'default',
+                'account': record_account,
                 'non_equity_pnl': pnl_data['non_equity_pnl'],
                 'total_pnl': pnl_data['total_pnl'],
                 'equity_pnl': pnl_data['equity_pnl'],
@@ -136,8 +162,11 @@ class PnLRecorder:
             # Save to CSV
             self._save_to_csv(daily_record)
             
-            logging.info(f"[P&L RECORD] Saved daily P&L: Non-Equity: ₹{pnl_data['non_equity_pnl']:.2f}, "
+            logging.info(f"[P&L RECORD] Saved daily P&L for account '{record_account}': "
+                       f"Non-Equity: ₹{pnl_data['non_equity_pnl']:.2f}, "
                        f"Total: ₹{pnl_data['total_pnl']:.2f}, Positions: {pnl_data['positions_count']}")
+            logging.info(f"[P&L RECORD] Saved to JSON: {self.json_file}")
+            logging.info(f"[P&L RECORD] Saved to CSV: {self.csv_file}")
             
             return True
             
@@ -146,21 +175,22 @@ class PnLRecorder:
             return False
     
     def _save_to_json(self, daily_record: Dict):
-        """Save daily record to JSON file"""
+        """Save daily record to account-specific JSON file"""
         try:
             # Load existing data
             if self.json_file.exists():
                 with open(self.json_file, 'r') as f:
                     data = json.load(f)
             else:
-                data = {'records': []}
+                data = {'records': [], 'account': daily_record['account']}
             
-            # Check if record for today already exists
+            # Check if record for today already exists (for this account)
             today = daily_record['date']
+            account = daily_record['account']
             records = data.get('records', [])
             
-            # Remove existing record for today if any
-            records = [r for r in records if r.get('date') != today]
+            # Remove existing record for today and this account
+            records = [r for r in records if not (r.get('date') == today and r.get('account') == account)]
             
             # Add new record
             records.append(daily_record)
@@ -169,20 +199,19 @@ class PnLRecorder:
             records.sort(key=lambda x: x.get('date', ''), reverse=True)
             
             data['records'] = records
+            data['account'] = account
             data['last_updated'] = datetime.now().isoformat()
             
             # Save to file
             with open(self.json_file, 'w') as f:
                 json.dump(data, f, indent=2)
-                
-            logging.info(f"[P&L RECORD] Saved to JSON: {self.json_file}")
             
         except Exception as e:
             logging.error(f"Error saving to JSON: {e}")
             raise
     
     def _save_to_csv(self, daily_record: Dict):
-        """Save daily record to CSV file"""
+        """Save daily record to account-specific CSV file"""
         try:
             # Check if CSV file exists
             file_exists = self.csv_file.exists()
@@ -199,45 +228,44 @@ class PnLRecorder:
             }
             
             # Write to CSV
-            with open(self.csv_file, 'a', newline='') as f:
-                writer = csv.DictWriter(f, fieldnames=row.keys())
+            if file_exists:
+                # Read existing records
+                with open(self.csv_file, 'r', newline='') as read_f:
+                    reader = csv.DictReader(read_f)
+                    existing_records = list(reader)
                 
-                # Write header if file is new
-                if not file_exists:
+                # Remove existing record for today and this account
+                today = row['date']
+                account = row['account']
+                existing_records = [r for r in existing_records 
+                                  if not (r.get('date') == today and r.get('account') == account)]
+                
+                # Write all records back
+                with open(self.csv_file, 'w', newline='') as write_f:
+                    writer = csv.DictWriter(write_f, fieldnames=row.keys())
                     writer.writeheader()
-                
-                # Check if record for today already exists
-                if file_exists:
-                    # Read existing records
-                    with open(self.csv_file, 'r') as read_f:
-                        reader = csv.DictReader(read_f)
-                        existing_records = list(reader)
-                    
-                    # Remove existing record for today
-                    existing_records = [r for r in existing_records if r.get('date') != row['date']]
-                    
-                    # Write all records back
-                    with open(self.csv_file, 'w', newline='') as write_f:
-                        writer = csv.DictWriter(write_f, fieldnames=row.keys())
-                        writer.writeheader()
-                        writer.writerows(existing_records)
-                        writer.writerow(row)
-                else:
-                    writer.writerow(row) 
-            
-            logging.info(f"[P&L  RECORD] Saved to CSV: {self.csv_file}")
+                    writer.writerows(existing_records)
+                    writer.writerow(row)
+            else:
+                # Create new file
+                with open(self.csv_file, 'w', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=row.keys())
+                    writer.writeheader()
+                    writer.writerow(row)
             
         except Exception as e:
             logging.error(f"Error saving to CSV: {e}")
             raise
     
-    def get_historical_pnl(self, start_date: Optional[date] = None, end_date: Optional[date] = None) -> List[Dict]:
+    def get_historical_pnl(self, start_date: Optional[date] = None, end_date: Optional[date] = None, 
+                           account: Optional[str] = None) -> List[Dict]:
         """
-        Get historical P&L records
+        Get historical P&L records for this account
         
         Args:
             start_date: Start date filter (optional)
             end_date: End date filter (optional)
+            account: Account filter (optional, uses instance account if not provided)
             
         Returns:
             List of P&L records
@@ -250,6 +278,10 @@ class PnLRecorder:
                 data = json.load(f)
             
             records = data.get('records', [])
+            filter_account = account or self.account
+            
+            # Filter by account
+            records = [r for r in records if r.get('account') == filter_account]
             
             # Filter by date range if provided
             if start_date or end_date:
@@ -268,4 +300,61 @@ class PnLRecorder:
         except Exception as e:
             logging.error(f"Error reading historical P&L: {e}")
             return []
+    
+    @classmethod
+    def get_all_accounts_pnl(cls, data_dir: str = "pnl_data", start_date: Optional[date] = None, 
+                             end_date: Optional[date] = None) -> Dict[str, List[Dict]]:
+        """
+        Get P&L records for all accounts
+        
+        Args:
+            data_dir: Directory containing P&L data files
+            start_date: Start date filter (optional)
+            end_date: End date filter (optional)
+            
+        Returns:
+            Dictionary mapping account names to their P&L records
+        """
+        try:
+            data_path = Path(data_dir)
+            if not data_path.exists():
+                return {}
+            
+            all_accounts_data = {}
+            
+            # Find all account-specific JSON files
+            json_files = list(data_path.glob("daily_pnl_*.json"))
+            
+            for json_file in json_files:
+                try:
+                    with open(json_file, 'r') as f:
+                        data = json.load(f)
+                    
+                    account = data.get('account', 'unknown')
+                    records = data.get('records', [])
+                    
+                    # Filter by date range if provided
+                    if start_date or end_date:
+                        filtered = []
+                        for record in records:
+                            record_date = datetime.fromisoformat(record['date']).date()
+                            if start_date and record_date < start_date:
+                                continue
+                            if end_date and record_date > end_date:
+                                continue
+                            filtered.append(record)
+                        records = filtered
+                    
+                    if records:
+                        all_accounts_data[account] = records
+                        
+                except Exception as e:
+                    logging.warning(f"Error reading P&L file {json_file}: {e}")
+                    continue
+            
+            return all_accounts_data
+            
+        except Exception as e:
+            logging.error(f"Error reading all accounts P&L: {e}")
+            return {}
 

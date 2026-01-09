@@ -1519,15 +1519,49 @@
             
             <form id="liveTraderForm" onsubmit="startLiveTraderStrategy(event)">
                 <div class="form-group">
-                    <label for="callQuantityInput">Call Quantity</label>
-                    <input type="number" id="callQuantityInput" placeholder="Enter call quantity" min="75" value="150" step="75" required>
-                    <small>Number of call options to trade (must be multiple of lot size - will be updated from config)</small>
+                    <label for="callLotSize">Lot Size</label>
+                    <input type="number" id="callLotSize" readonly style="background: #f0f0f0; cursor: not-allowed;" value="75">
+                    <small>Lot size fetched from config</small>
                 </div>
                 
                 <div class="form-group">
-                    <label for="putQuantityInput">Put Quantity</label>
-                    <input type="number" id="putQuantityInput" placeholder="Enter put quantity" min="75" value="150" step="75" required>
-                    <small>Number of put options to trade (must be multiple of lot size - will be updated from config)</small>
+                    <label for="callLotsInput">Call Lots</label>
+                    <input type="number" id="callLotsInput" placeholder="Enter number of lots" min="1" value="2" step="1" required>
+                    <small>Number of lots for call options</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="callQuantityDisplay">Call Quantity (Calculated)</label>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <input type="text" id="callQuantityDisplay" readonly style="background: #e8f5e9; font-weight: 600; color: #2e7d32; flex: 1;" value="150">
+                        <div id="callQuantityFormula" style="padding: 8px 12px; background: #f5f5f5; border-radius: 4px; font-size: 14px; color: #666; white-space: nowrap;">
+                            <span id="callLotSizeDisplay">75</span> × <span id="callLotsDisplay">2</span> = <span id="callQuantityResult">150</span>
+                        </div>
+                    </div>
+                    <small>Lot Size × Lots = Quantity</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="putLotSize">Lot Size</label>
+                    <input type="number" id="putLotSize" readonly style="background: #f0f0f0; cursor: not-allowed;" value="75">
+                    <small>Lot size fetched from config</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="putLotsInput">Put Lots</label>
+                    <input type="number" id="putLotsInput" placeholder="Enter number of lots" min="1" value="2" step="1" required>
+                    <small>Number of lots for put options</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="putQuantityDisplay">Put Quantity (Calculated)</label>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <input type="text" id="putQuantityDisplay" readonly style="background: #e8f5e9; font-weight: 600; color: #2e7d32; flex: 1;" value="150">
+                        <div id="putQuantityFormula" style="padding: 8px 12px; background: #f5f5f5; border-radius: 4px; font-size: 14px; color: #666; white-space: nowrap;">
+                            <span id="putLotSizeDisplay">75</span> × <span id="putLotsDisplay">2</span> = <span id="putQuantityResult">150</span>
+                        </div>
+                    </div>
+                    <small>Lot Size × Lots = Quantity</small>
                 </div>
                 
                 <div class="auth-error" id="liveTraderError"></div>
@@ -1769,6 +1803,49 @@
         let isLiveTraderActive = false;
         let lotSize = 75; // Default lot size, will be fetched from API
 
+        // Calculate and update quantity display
+        function updateQuantityDisplay() {
+            const callLotSizeInput = document.getElementById('callLotSize');
+            const callLotsInput = document.getElementById('callLotsInput');
+            const callQuantityDisplay = document.getElementById('callQuantityDisplay');
+            const callLotSizeDisplay = document.getElementById('callLotSizeDisplay');
+            const callLotsDisplay = document.getElementById('callLotsDisplay');
+            const callQuantityResult = document.getElementById('callQuantityResult');
+            
+            const putLotSizeInput = document.getElementById('putLotSize');
+            const putLotsInput = document.getElementById('putLotsInput');
+            const putQuantityDisplay = document.getElementById('putQuantityDisplay');
+            const putLotSizeDisplay = document.getElementById('putLotSizeDisplay');
+            const putLotsDisplay = document.getElementById('putLotsDisplay');
+            const putQuantityResult = document.getElementById('putQuantityResult');
+            
+            // Update Call Quantity
+            if (callLotSizeInput && callLotsInput && callQuantityDisplay) {
+                const lotSize = parseInt(callLotSizeInput.value) || lotSize;
+                const lots = parseInt(callLotsInput.value) || 0;
+                const quantity = lotSize * lots;
+                callQuantityDisplay.value = quantity || 0;
+                
+                // Update formula display
+                if (callLotSizeDisplay) callLotSizeDisplay.textContent = lotSize;
+                if (callLotsDisplay) callLotsDisplay.textContent = lots;
+                if (callQuantityResult) callQuantityResult.textContent = quantity || 0;
+            }
+            
+            // Update Put Quantity
+            if (putLotSizeInput && putLotsInput && putQuantityDisplay) {
+                const lotSize = parseInt(putLotSizeInput.value) || lotSize;
+                const lots = parseInt(putLotsInput.value) || 0;
+                const quantity = lotSize * lots;
+                putQuantityDisplay.value = quantity || 0;
+                
+                // Update formula display
+                if (putLotSizeDisplay) putLotSizeDisplay.textContent = lotSize;
+                if (putLotsDisplay) putLotsDisplay.textContent = lots;
+                if (putQuantityResult) putQuantityResult.textContent = quantity || 0;
+            }
+        }
+        
         // Fetch lot size from config
         async function fetchLotSize() {
             try {
@@ -1777,33 +1854,32 @@
                     const data = await response.json();
                     if (data.success) {
                         lotSize = data.lot_size;
-                        // Update input fields with lot size
-                        const callQtyInput = document.getElementById('callQuantityInput');
-                        const putQtyInput = document.getElementById('putQuantityInput');
-                        if (callQtyInput) {
-                            callQtyInput.min = lotSize;
-                            callQtyInput.step = lotSize;
-                            if (!callQtyInput.value || parseInt(callQtyInput.value) < lotSize) {
-                                callQtyInput.value = lotSize * 2; // Default to 2 lots
-                            }
-                            // Update help text
-                            const callQtySmall = callQtyInput.parentElement.querySelector('small');
-                            if (callQtySmall) {
-                                callQtySmall.textContent = `Number of call options to trade (must be multiple of ${lotSize}, e.g., ${lotSize}, ${lotSize * 2}, ${lotSize * 3}, ${lotSize * 4})`;
-                            }
+                        
+                        // Update lot size display fields
+                        const callLotSizeInput = document.getElementById('callLotSize');
+                        const putLotSizeInput = document.getElementById('putLotSize');
+                        if (callLotSizeInput) callLotSizeInput.value = lotSize;
+                        if (putLotSizeInput) putLotSizeInput.value = lotSize;
+                        
+                        // Update formula display lot sizes
+                        const callLotSizeDisplay = document.getElementById('callLotSizeDisplay');
+                        const putLotSizeDisplay = document.getElementById('putLotSizeDisplay');
+                        if (callLotSizeDisplay) callLotSizeDisplay.textContent = lotSize;
+                        if (putLotSizeDisplay) putLotSizeDisplay.textContent = lotSize;
+                        
+                        // Set default lots (2 lots)
+                        const callLotsInput = document.getElementById('callLotsInput');
+                        const putLotsInput = document.getElementById('putLotsInput');
+                        if (callLotsInput && !callLotsInput.value) {
+                            callLotsInput.value = 2;
                         }
-                        if (putQtyInput) {
-                            putQtyInput.min = lotSize;
-                            putQtyInput.step = lotSize;
-                            if (!putQtyInput.value || parseInt(putQtyInput.value) < lotSize) {
-                                putQtyInput.value = lotSize * 2; // Default to 2 lots
-                            }
-                            // Update help text
-                            const putQtySmall = putQtyInput.parentElement.querySelector('small');
-                            if (putQtySmall) {
-                                putQtySmall.textContent = `Number of put options to trade (must be multiple of ${lotSize}, e.g., ${lotSize}, ${lotSize * 2}, ${lotSize * 3}, ${lotSize * 4})`;
-                            }
+                        if (putLotsInput && !putLotsInput.value) {
+                            putLotsInput.value = 2;
                         }
+                        
+                        // Update quantity displays (this will also update formula displays)
+                        updateQuantityDisplay();
+                        
                         console.log(`[LOT SIZE] Loaded from config: ${lotSize}`);
                     }
                 }
@@ -1816,6 +1892,26 @@
         // Initialize dashboard
         document.addEventListener('DOMContentLoaded', function() {
             fetchLotSize(); // Fetch lot size first
+            
+            // Add event listeners for lot quantity changes
+            const callLotsInput = document.getElementById('callLotsInput');
+            const putLotsInput = document.getElementById('putLotsInput');
+            const callLotSizeInput = document.getElementById('callLotSize');
+            const putLotSizeInput = document.getElementById('putLotSize');
+            
+            if (callLotsInput) {
+                callLotsInput.addEventListener('input', updateQuantityDisplay);
+            }
+            if (putLotsInput) {
+                putLotsInput.addEventListener('input', updateQuantityDisplay);
+            }
+            if (callLotSizeInput) {
+                callLotSizeInput.addEventListener('change', updateQuantityDisplay);
+            }
+            if (putLotSizeInput) {
+                putLotSizeInput.addEventListener('change', updateQuantityDisplay);
+            }
+            
             initializeTheme();
             initializeDashboard();
             setupDateFilter();
@@ -2142,14 +2238,36 @@
         async function startLiveTraderStrategy(event) {
             event.preventDefault();
             
-            const callQuantity = parseInt(document.getElementById('callQuantityInput').value.trim());
-            const putQuantity = parseInt(document.getElementById('putQuantityInput').value.trim());
+            // Get calculated quantities from display fields
+            const callQuantityDisplay = document.getElementById('callQuantityDisplay');
+            const putQuantityDisplay = document.getElementById('putQuantityDisplay');
+            const callLotsInput = document.getElementById('callLotsInput');
+            const putLotsInput = document.getElementById('putLotsInput');
+            
+            const callQuantity = parseInt(callQuantityDisplay ? callQuantityDisplay.value : 0);
+            const putQuantity = parseInt(putQuantityDisplay ? putQuantityDisplay.value : 0);
             const errorEl = document.getElementById('liveTraderError');
             const submitBtn = event.target.querySelector('button[type="submit"]');
             
+            if (!callLotsInput || !callLotsInput.value || parseInt(callLotsInput.value) <= 0) {
+                if (errorEl) {
+                    errorEl.textContent = 'Please enter a valid number of Call Lots';
+                    errorEl.classList.add('show');
+                }
+                return;
+            }
+            
+            if (!putLotsInput || !putLotsInput.value || parseInt(putLotsInput.value) <= 0) {
+                if (errorEl) {
+                    errorEl.textContent = 'Please enter a valid number of Put Lots';
+                    errorEl.classList.add('show');
+                }
+                return;
+            }
+            
             if (!callQuantity || callQuantity <= 0) {
                 if (errorEl) {
-                    errorEl.textContent = 'Please enter a valid Call Quantity';
+                    errorEl.textContent = 'Call Quantity is invalid. Please check your lot size and lots.';
                     errorEl.classList.add('show');
                 }
                 return;
@@ -2157,24 +2275,7 @@
             
             if (!putQuantity || putQuantity <= 0) {
                 if (errorEl) {
-                    errorEl.textContent = 'Please enter a valid Put Quantity';
-                    errorEl.classList.add('show');
-                }
-                return;
-            }
-
-            // Validate quantities are multiples of lot size (from config)
-            if (callQuantity % lotSize !== 0) {
-                if (errorEl) {
-                    errorEl.textContent = `Call Quantity must be a multiple of ${lotSize}. You entered ${callQuantity}. Nearest valid: ${Math.floor(callQuantity / lotSize) * lotSize}`;
-                    errorEl.classList.add('show');
-                }
-                return;
-            }
-
-            if (putQuantity % lotSize !== 0) {
-                if (errorEl) {
-                    errorEl.textContent = `Put Quantity must be a multiple of ${lotSize}. You entered ${putQuantity}. Nearest valid: ${Math.floor(putQuantity / lotSize) * lotSize}`;
+                    errorEl.textContent = 'Put Quantity is invalid. Please check your lot size and lots.';
                     errorEl.classList.add('show');
                 }
                 return;
@@ -2478,7 +2579,7 @@
                 const authStatusEl = document.getElementById('authStatus');
                 const authStatusText = document.getElementById('authStatusText');
                 
-                if (authStatusEl) {
+                    if (authStatusEl) {
                     if (isAuthenticated) {
                         authStatusEl.className = 'status-badge authenticated';
                         authStatusEl.innerHTML = '<i class="fas fa-check-circle"></i><span id="authStatusText">Authenticated</span>';
@@ -2491,7 +2592,28 @@
                         if (data.account_name) {
                             updateAccountNameDisplay(data.account_name);
                         }
+                        
+                        // CRITICAL: Update user info display
+                        const userInfo = document.getElementById('userInfo');
+                        const userName = document.getElementById('userName');
+                        const userId = document.getElementById('userId');
+                        
+                        if (userInfo) userInfo.style.display = 'flex';
+                        if (userName) {
+                            userName.textContent = data.account_name || data.full_name || data.email || data.user_id || 'User';
+                        }
+                        if (userId) {
+                            userId.textContent = data.user_id || data.broker_id || '-';
+                        }
                     } else {
+                        // Hide user info when not authenticated
+                        const userInfo = document.getElementById('userInfo');
+                        const userName = document.getElementById('userName');
+                        const userId = document.getElementById('userId');
+                        
+                        if (userInfo) userInfo.style.display = 'none';
+                        if (userName) userName.textContent = 'Loading...';
+                        if (userId) userId.textContent = '-';
                         authStatusEl.className = 'status-badge not-authenticated';
                         // CRITICAL: Preserve onclick before updating innerHTML
                         authStatusEl.setAttribute('onclick', 'showAuthModal()');
@@ -2517,6 +2639,27 @@
                     if (authStatusText) {
                         authStatusText.textContent = isAuthenticated ? 'Authenticated' : 'Not Authenticated';
                     }
+                }
+                
+                // CRITICAL: Update user info display
+                const userInfo = document.getElementById('userInfo');
+                const userName = document.getElementById('userName');
+                const userId = document.getElementById('userId');
+                
+                if (isAuthenticated) {
+                    // Show user info and update with actual data
+                    if (userInfo) userInfo.style.display = 'flex';
+                    if (userName) {
+                        userName.textContent = data.account_name || data.full_name || data.email || data.user_id || 'User';
+                    }
+                    if (userId) {
+                        userId.textContent = data.user_id || data.broker_id || '-';
+                    }
+                } else {
+                    // Hide user info
+                    if (userInfo) userInfo.style.display = 'none';
+                    if (userName) userName.textContent = 'Loading...';
+                    if (userId) userId.textContent = '-';
                 }
                 
                 // CRITICAL: Update connection status to match authentication status
@@ -2586,6 +2729,15 @@
                     authStatusEl.innerHTML = '<i class="fas fa-lock"></i><span id="authStatusText">Not Authenticated</span>';
                     authStatusEl.onclick = showAuthModal;
                 }
+                
+                // Hide user info on error
+                const userInfo = document.getElementById('userInfo');
+                const userName = document.getElementById('userName');
+                const userId = document.getElementById('userId');
+                
+                if (userInfo) userInfo.style.display = 'none';
+                if (userName) userName.textContent = 'Loading...';
+                if (userId) userId.textContent = '-';
             }
         }
         
@@ -2824,6 +2976,10 @@
                     }
                     // Immediately update auth status (don't wait for polling)
                     await checkAuthStatus();
+                    // Update authentication details widget
+                    if (typeof updateAuthDetails === 'function') {
+                        await updateAuthDetails();
+                    }
                     checkConnectivity();
                     // Show success notification
                     showNotification('Successfully connected with access token!', 'success');
