@@ -33,7 +33,12 @@ cd "$(dirname "$0")" || exit 1
 # Try gunicorn first (better for production), fallback to Flask dev server
 if command -v gunicorn &> /dev/null; then
     echo "Starting with gunicorn..."
-    exec gunicorn --bind 0.0.0.0:$PORT --timeout 600 --workers 1 --threads 2 --access-logfile - --error-logfile - --log-level info "src.config_dashboard:app"
+    # Use wsgi.py if it exists (standard WSGI entry point), otherwise use direct import
+    if [ -f "wsgi.py" ]; then
+        exec gunicorn --bind 0.0.0.0:$PORT --timeout 600 --workers 1 --threads 2 --access-logfile - --error-logfile - --log-level info "wsgi:app"
+    else
+        exec gunicorn --bind 0.0.0.0:$PORT --timeout 600 --workers 1 --threads 2 --access-logfile - --error-logfile - --log-level info "src.config_dashboard:app"
+    fi
 else
     echo "Starting with Flask (gunicorn not found, using dev server)..."
     python -c "

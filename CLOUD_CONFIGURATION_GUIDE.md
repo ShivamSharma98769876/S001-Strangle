@@ -164,12 +164,22 @@ Add the following:
 
 Go to: **Azure Portal > App Service > Configuration > General settings**
 
-**Startup Command:**
+**Startup Command (Choose ONE):**
+
+**Option 1 (Recommended - Standard WSGI):**
 ```bash
-gunicorn -w 1 -b 0.0.0.0:8000 src.config_dashboard:app
+gunicorn wsgi:app --bind 0.0.0.0:8000 --timeout 600
 ```
 
-**Note:** Azure automatically sets `HTTP_PLATFORM_PORT` - the system will auto-detect it.
+**Option 2 (Alternative):**
+```bash
+gunicorn src.config_dashboard:app --bind 0.0.0.0:8000 --timeout 600
+```
+
+**⚠️ IMPORTANT:** 
+- Do NOT use `gunicorn app:app` - `app.py` is a Streamlit application, not a Flask/WSGI app
+- Azure automatically sets `HTTP_PLATFORM_PORT` - the system will auto-detect it
+- The `wsgi.py` file provides the standard WSGI entry point for deployment
 
 #### Step 3: Enable HTTPS
 
@@ -413,12 +423,38 @@ Look for this in application logs:
 
 ## 🐛 Troubleshooting
 
+### Issue: "Failed to find attribute 'app' in 'app'"
+
+**Error Message:**
+```
+Failed to find attribute 'app' in 'app'.
+[ERROR] Worker (pid:2122) exited with code 4
+[ERROR] Reason: App failed to load.
+```
+
+**Cause:** Azure App Service is configured to use `gunicorn app:app`, but `app.py` is a Streamlit application, not a Flask/WSGI app.
+
+**Solution:**
+1. Go to **Azure Portal > App Service > Configuration > General settings**
+2. Update **Startup Command** to:
+   ```bash
+   gunicorn wsgi:app --bind 0.0.0.0:8000 --timeout 600
+   ```
+3. Save the configuration
+4. Restart the App Service
+
+**Alternative:** If you prefer to use the direct import:
+```bash
+gunicorn src.config_dashboard:app --bind 0.0.0.0:8000 --timeout 600
+```
+
 ### Issue: Application doesn't start
 
 **Check:**
 - All required environment variables are set
 - Database is accessible from cloud server
 - Port is available (check cloud platform port configuration)
+- Startup command is correct (see above)
 
 ### Issue: Sessions not working
 
