@@ -1,0 +1,1365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Trader - Zero Touch Strangle</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --primary-color: #3b82f6;
+            --success-color: #10b981;
+            --warning-color: #f59e0b;
+            --danger-color: #ef4444;
+            --border-color: #334155;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: var(--bg-color);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-title h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin: 0;
+        }
+
+        .header-title i {
+            font-size: 32px;
+            color: var(--primary-color);
+        }
+
+        .header-controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--bg-color);
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-dot.connected {
+            background: var(--success-color);
+            box-shadow: 0 0 8px var(--success-color);
+        }
+
+        .status-dot.disconnected {
+            background: var(--danger-color);
+            box-shadow: 0 0 8px var(--danger-color);
+        }
+
+        .status-badge {
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-badge.authenticated {
+            background: var(--success-color);
+            color: white;
+        }
+
+        .status-badge.not-authenticated {
+            background: var(--danger-color);
+            color: white;
+        }
+
+        .status-badge.engine-running {
+            background: var(--success-color);
+            color: white;
+        }
+
+        .status-badge.engine-stopped {
+            background: var(--danger-color);
+            color: white;
+        }
+
+        .header-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .header-btn.primary {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .header-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+        }
+
+        /* Status Cards Row */
+        .status-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .status-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: var(--shadow);
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .status-card.success {
+            border-left-color: var(--success-color);
+        }
+
+        .status-card.warning {
+            border-left-color: var(--warning-color);
+        }
+
+        .status-card.danger {
+            border-left-color: var(--danger-color);
+        }
+
+        .status-card-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+
+        .status-card-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        /* Main Content */
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        .panel {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: var(--shadow);
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        .panel-header h2 {
+            font-size: 20px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--bg-color);
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 16px;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+
+        .form-group small {
+            display: block;
+            margin-top: 6px;
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+
+        .pyramiding-config {
+            background: var(--bg-color);
+            padding: 16px;
+            border-radius: 8px;
+            margin-top: 16px;
+        }
+
+        .pyramiding-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .pyramiding-item:last-child {
+            border-bottom: none;
+        }
+
+        .pyramiding-label {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .pyramiding-value {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-success {
+            background: var(--success-color);
+            color: white;
+        }
+
+        .btn-danger {
+            background: var(--danger-color);
+            color: white;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Logs Section */
+        .logs-panel {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: var(--shadow);
+        }
+
+        .logs-container {
+            background: #0a0e1a;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            height: 500px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .log-entry {
+            margin-bottom: 4px;
+            padding: 4px 0;
+        }
+
+        .log-entry.info {
+            color: #60a5fa;
+        }
+
+        .log-entry.success {
+            color: #34d399;
+        }
+
+        .log-entry.warning {
+            color: #fbbf24;
+        }
+
+        .log-entry.error {
+            color: #f87171;
+        }
+
+        .log-timestamp {
+            color: var(--text-secondary);
+            margin-right: 8px;
+        }
+
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 2px solid var(--danger-color);
+            border-radius: 8px;
+            padding: 12px;
+            margin-top: 16px;
+            color: var(--danger-color);
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-left">
+                <div class="header-title">
+                    <i class="fas fa-play-circle"></i>
+                    <h1>Live Trader</h1>
+                    {% if account_holder_name %}
+                    <span class="account-name-display" style="margin-left: 15px; font-size: 1.1em; color: var(--text-secondary);">
+                        <i class="fas fa-user"></i> {{ account_holder_name }}
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="header-controls">
+                <div class="status-indicator" id="connectionStatus">
+                    <span class="status-dot disconnected" id="connectionDot"></span>
+                    <span id="connectionText">Disconnected</span>
+                </div>
+                <div class="status-badge not-authenticated" id="authStatus" onclick="showAuthModal()" style="cursor: pointer;">
+                    <i class="fas fa-lock"></i>
+                    <span id="authStatusText">Not Authenticated</span>
+                </div>
+                <div class="status-badge not-authenticated" id="kiteStatus">
+                    <i class="fas fa-plug"></i>
+                    <span>Kite: Not Connected</span>
+                </div>
+                <div class="status-badge engine-stopped" id="engineStatus">
+                    <i class="fas fa-cog"></i>
+                    <span>Engine: Stopped</span>
+                </div>
+                <a href="/" class="header-btn primary">
+                    <i class="fas fa-arrow-left"></i> Back to Dashboard
+                </a>
+            </div>
+        </div>
+
+        <!-- Status Cards -->
+        <div class="status-cards">
+            <div class="status-card">
+                <div class="status-card-label">Connection</div>
+                <div class="status-card-value" id="connectionStatusValue">Disconnected</div>
+            </div>
+            <div class="status-card success" id="engineStatusCard">
+                <div class="status-card-label">Engine Status</div>
+                <div class="status-card-value" id="engineStatusValue">Stopped</div>
+            </div>
+            <div class="status-card" id="kiteStatusCard">
+                <div class="status-card-label">Kite Connectivity</div>
+                <div class="status-card-value" id="kiteStatusValue">Not Connected</div>
+            </div>
+            <div class="status-card">
+                <div class="status-card-label">Trading Segment</div>
+                <div class="status-card-value" id="tradingSegmentValue">NIFTY</div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Configuration Panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2><i class="fas fa-cog"></i> Trading Configuration</h2>
+                </div>
+                
+                <form id="liveTraderForm">
+                    <div class="form-group">
+                        <label for="callQuantity">Call Quantity</label>
+                        <input type="number" id="callQuantity" name="callQuantity" min="75" value="150" step="75" required>
+                        <small>Number of call options to trade (must be multiple of lot size - will be updated from config)</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="putQuantity">Put Quantity</label>
+                        <input type="number" id="putQuantity" name="putQuantity" min="75" value="150" step="75" required>
+                        <small>Number of put options to trade (must be multiple of lot size - will be updated from config)</small>
+                    </div>
+
+                    <!-- Pyramiding Configuration (Miniature) -->
+                    <div class="pyramiding-config">
+                        <div style="font-weight: 600; margin-bottom: 12px; color: var(--text-primary);">
+                            <i class="fas fa-layer-group"></i> Pyramiding Configuration
+                        </div>
+                        <div class="pyramiding-item">
+                            <span class="pyramiding-label">Segment:</span>
+                            <span class="pyramiding-value" id="pyramidingSegment">NIFTY</span>
+                        </div>
+                        <div class="pyramiding-item">
+                            <span class="pyramiding-label">Call Qty:</span>
+                            <span class="pyramiding-value" id="pyramidingCallQty">50</span>
+                        </div>
+                        <div class="pyramiding-item">
+                            <span class="pyramiding-label">Put Qty:</span>
+                            <span class="pyramiding-value" id="pyramidingPutQty">50</span>
+                        </div>
+                    </div>
+
+                    <div class="error-message" id="errorMessage"></div>
+
+                    <div class="btn-group">
+                        <button type="submit" class="btn btn-success" id="startBtn">
+                            <i class="fas fa-play"></i> Start Live Trader
+                        </button>
+                        <button type="button" class="btn btn-danger" id="stopBtn" onclick="stopLiveTrader()" disabled>
+                            <i class="fas fa-stop"></i> Stop Live Trader
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Info Panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2><i class="fas fa-info-circle"></i> Strategy Information</h2>
+                </div>
+                <div style="color: var(--text-secondary); line-height: 1.8;">
+                    <p><strong>Strategy:</strong> Zero Touch Strangle</p>
+                    <p><strong>Description:</strong> An advanced zero touch options engine that automates the full lifecycle of a short strangle: entry, stop loss placement, re entry after SL hits, and continuous delta based rebalancing.</p>
+                    <p style="margin-top: 16px;"><strong>Features:</strong></p>
+                    <ul style="margin-left: 20px; margin-top: 8px;">
+                        <li>Automated entry and exit</li>
+                        <li>Dynamic stop loss management</li>
+                        <li>Delta-based rebalancing</li>
+                        <li>Real-time position monitoring</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Live Trading Logs -->
+        <div class="logs-panel">
+            <div class="panel-header">
+                <h2><i class="fas fa-terminal"></i> Live Trading Logs</h2>
+                <button class="btn btn-success" onclick="refreshLogs()" style="flex: 0; padding: 8px 16px;">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+            <div class="logs-container" id="logsContainer" onscroll="handleLogScroll()">
+                <div class="log-entry info">
+                    <span class="log-timestamp">[--:--:--]</span>
+                    <span>Waiting for logs...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isRunning = false;
+        let logsInterval = null;
+        let lastLogText = null; // Track the last log line we've displayed (for tail-like behavior)
+        let isInitialLoad = true; // Track if this is the first load
+        let lotSize = 75; // Default lot size, will be fetched from API
+        let autoScrollEnabled = true; // Tail mode: always auto-scroll to bottom when new logs arrive
+        let userScrolledUp = false; // Track if user manually scrolled up
+
+        // Fetch lot size from config
+        async function fetchLotSize() {
+            try {
+                const response = await fetch('/api/config/lot-size');
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        lotSize = data.lot_size;
+                        // Update input fields with lot size
+                        const callQtyInput = document.getElementById('callQuantity');
+                        const putQtyInput = document.getElementById('putQuantity');
+                        if (callQtyInput) {
+                            callQtyInput.min = lotSize;
+                            callQtyInput.step = lotSize;
+                            if (!callQtyInput.value || parseInt(callQtyInput.value) < lotSize) {
+                                callQtyInput.value = lotSize * 2; // Default to 2 lots
+                            }
+                            // Update help text
+                            const callQtySmall = callQtyInput.parentElement.querySelector('small');
+                            if (callQtySmall) {
+                                callQtySmall.textContent = `Number of call options to trade (must be multiple of ${lotSize}, e.g., ${lotSize}, ${lotSize * 2}, ${lotSize * 3}, ${lotSize * 4})`;
+                            }
+                        }
+                        if (putQtyInput) {
+                            putQtyInput.min = lotSize;
+                            putQtyInput.step = lotSize;
+                            if (!putQtyInput.value || parseInt(putQtyInput.value) < lotSize) {
+                                putQtyInput.value = lotSize * 2; // Default to 2 lots
+                            }
+                            // Update help text
+                            const putQtySmall = putQtyInput.parentElement.querySelector('small');
+                            if (putQtySmall) {
+                                putQtySmall.textContent = `Number of put options to trade (must be multiple of ${lotSize}, e.g., ${lotSize}, ${lotSize * 2}, ${lotSize * 3}, ${lotSize * 4})`;
+                            }
+                        }
+                        console.log(`[LOT SIZE] Loaded from config: ${lotSize}`);
+                    }
+                }
+            } catch (error) {
+                console.error('[LOT SIZE] Error fetching lot size:', error);
+                // Use default 75 if fetch fails
+            }
+        }
+
+        // Initialize page
+        document.addEventListener('DOMContentLoaded', function() {
+            fetchLotSize(); // Fetch lot size first
+            checkStatus();
+            loadLogs();
+            
+            // Set up form submission
+            document.getElementById('liveTraderForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                startLiveTrader();
+            });
+
+            // Update pyramiding config when quantities change
+            document.getElementById('callQuantity').addEventListener('input', updatePyramidingConfig);
+            document.getElementById('putQuantity').addEventListener('input', updatePyramidingConfig);
+
+            // Auto-refresh status every 5 seconds
+            setInterval(checkStatus, 5000);
+            
+            // Auto-refresh logs every 3 seconds
+            logsInterval = setInterval(loadLogs, 3000);
+        });
+
+        function updatePyramidingConfig() {
+            const callQty = document.getElementById('callQuantity').value;
+            const putQty = document.getElementById('putQuantity').value;
+            document.getElementById('pyramidingCallQty').textContent = callQty || '50';
+            document.getElementById('pyramidingPutQty').textContent = putQty || '50';
+        }
+
+        async function checkStatus() {
+            try {
+                // Check authentication
+                const authResponse = await fetch('/api/auth/status');
+                const authData = await authResponse.json();
+                
+                // Update Kite status
+                const kiteStatus = document.getElementById('kiteStatus');
+                const kiteStatusValue = document.getElementById('kiteStatusValue');
+                const kiteStatusCard = document.getElementById('kiteStatusCard');
+                
+                if (authData.authenticated) {
+                    kiteStatus.className = 'status-badge authenticated';
+                    kiteStatus.innerHTML = '<i class="fas fa-plug"></i><span>Kite: Connected</span>';
+                    kiteStatusValue.textContent = 'Connected';
+                    kiteStatusCard.className = 'status-card success';
+                } else {
+                    kiteStatus.className = 'status-badge not-authenticated';
+                    kiteStatus.innerHTML = '<i class="fas fa-plug"></i><span>Kite: Not Connected</span>';
+                    kiteStatusValue.textContent = 'Not Connected';
+                    kiteStatusCard.className = 'status-card danger';
+                }
+                
+                // CRITICAL: Update authentication button to match Kite connectivity
+                // If Kite is connected, authentication button should be green (authenticated)
+                const authButton = document.getElementById('authStatus');
+                if (authButton) {
+                    if (authData.authenticated) {
+                        authButton.className = 'status-badge authenticated';
+                        authButton.innerHTML = '<i class="fas fa-check-circle"></i><span>Authenticated</span>';
+                        authButton.onclick = null;
+                        authButton.style.cursor = 'default';
+                        authButton.style.pointerEvents = 'none';
+                    } else {
+                        authButton.className = 'status-badge not-authenticated';
+                        authButton.innerHTML = '<i class="fas fa-lock"></i><span>Not Authenticated</span>';
+                        authButton.onclick = showAuthModal;
+                        authButton.style.cursor = 'pointer';
+                        authButton.style.pointerEvents = 'auto';
+                    }
+                }
+
+                // Check connection
+                const connectionDot = document.getElementById('connectionDot');
+                const connectionText = document.getElementById('connectionText');
+                const connectionStatusValue = document.getElementById('connectionStatusValue');
+                
+                if (authData.authenticated) {
+                    connectionDot.className = 'status-dot connected';
+                    connectionText.textContent = 'Connected';
+                    connectionStatusValue.textContent = 'Connected';
+                } else {
+                    connectionDot.className = 'status-dot disconnected';
+                    connectionText.textContent = 'Disconnected';
+                    connectionStatusValue.textContent = 'Disconnected';
+                }
+
+                // Check engine status from server - MUST check before updating UI
+                let actualRunning = false;
+                try {
+                    const statusResponse = await fetch('/api/live-trader/status');
+                    if (statusResponse.ok) {
+                        const statusData = await statusResponse.json();
+                        actualRunning = statusData.running || false;
+                        // Update isRunning to match server state
+                        isRunning = actualRunning;
+                        console.log('[STATUS] Engine status from server:', actualRunning ? 'Running' : 'Stopped');
+                        console.log('[STATUS] Full status data:', statusData);
+                    } else {
+                        console.error('[STATUS] Failed to get engine status:', statusResponse.status);
+                        const errorText = await statusResponse.text();
+                        console.error('[STATUS] Error response:', errorText);
+                    }
+                } catch (error) {
+                    console.error('[STATUS] Error checking engine status:', error);
+                }
+                
+                const engineStatus = document.getElementById('engineStatus');
+                const engineStatusValue = document.getElementById('engineStatusValue');
+                const engineStatusCard = document.getElementById('engineStatusCard');
+                const startBtn = document.getElementById('startBtn');
+                const stopBtn = document.getElementById('stopBtn');
+                
+                // CRITICAL: Update engine status in BOTH header and status card
+                if (actualRunning) {
+                    // Update header badge
+                    if (engineStatus) {
+                        engineStatus.className = 'status-badge engine-running';
+                        engineStatus.innerHTML = '<i class="fas fa-cog fa-spin"></i><span>Engine: Running</span>';
+                    }
+                    // Update status card
+                    if (engineStatusValue) {
+                        engineStatusValue.textContent = 'Running';
+                    }
+                    if (engineStatusCard) {
+                        engineStatusCard.className = 'status-card success';
+                    }
+                    // Update button states - CRITICAL: Disable start button when running
+                    if (startBtn) {
+                        startBtn.disabled = true;
+                        startBtn.style.opacity = '0.6';
+                        startBtn.style.cursor = 'not-allowed';
+                    }
+                    if (stopBtn) {
+                        stopBtn.disabled = false;
+                        stopBtn.style.opacity = '1';
+                        stopBtn.style.cursor = 'pointer';
+                    }
+                } else {
+                    // Update header badge
+                    if (engineStatus) {
+                        engineStatus.className = 'status-badge engine-stopped';
+                        engineStatus.innerHTML = '<i class="fas fa-cog"></i><span>Engine: Stopped</span>';
+                    }
+                    // Update status card
+                    if (engineStatusValue) {
+                        engineStatusValue.textContent = 'Stopped';
+                    }
+                    if (engineStatusCard) {
+                        engineStatusCard.className = 'status-card danger';
+                    }
+                    // Update button states - Enable start button when stopped
+                    if (startBtn) {
+                        startBtn.disabled = false;
+                        startBtn.style.opacity = '1';
+                        startBtn.style.cursor = 'pointer';
+                    }
+                    if (stopBtn) {
+                        stopBtn.disabled = true;
+                        stopBtn.style.opacity = '0.6';
+                        stopBtn.style.cursor = 'not-allowed';
+                    }
+                }
+                
+                // Update account name if available
+                if (authData.account_name) {
+                    updateAccountNameDisplay(authData.account_name);
+                }
+            } catch (error) {
+                console.error('Error checking status:', error);
+            }
+        }
+
+        async function startLiveTrader() {
+            // First check actual status from server before starting
+            try {
+                const statusResponse = await fetch('/api/live-trader/status');
+                if (statusResponse.ok) {
+                    const statusData = await statusResponse.json();
+                    if (statusData.running) {
+                        const errorEl = document.getElementById('errorMessage');
+                        if (errorEl) {
+                            errorEl.textContent = 'Strategy is already running. Please stop it first.';
+                            errorEl.classList.add('show');
+                        }
+                        // Update UI to reflect running state
+                        isRunning = true;
+                        checkStatus();
+                        return;
+                    }
+                }
+            } catch (error) {
+                console.error('[START] Error checking status before start:', error);
+            }
+            
+            const callQuantity = parseInt(document.getElementById('callQuantity').value);
+            const putQuantity = parseInt(document.getElementById('putQuantity').value);
+            const errorEl = document.getElementById('errorMessage');
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+
+            if (!callQuantity || callQuantity <= 0) {
+                errorEl.textContent = 'Please enter a valid Call Quantity';
+                errorEl.classList.add('show');
+                return;
+            }
+
+            if (!putQuantity || putQuantity <= 0) {
+                errorEl.textContent = 'Please enter a valid Put Quantity';
+                errorEl.classList.add('show');
+                return;
+            }
+
+            // Validate quantities are multiples of lot size (from config)
+            if (callQuantity % lotSize !== 0) {
+                errorEl.textContent = `Call Quantity must be a multiple of ${lotSize}. You entered ${callQuantity}. Nearest valid: ${Math.floor(callQuantity / lotSize) * lotSize}`;
+                errorEl.classList.add('show');
+                return;
+            }
+
+            if (putQuantity % lotSize !== 0) {
+                errorEl.textContent = `Put Quantity must be a multiple of ${lotSize}. You entered ${putQuantity}. Nearest valid: ${Math.floor(putQuantity / lotSize) * lotSize}`;
+                errorEl.classList.add('show');
+                return;
+            }
+
+            try {
+                errorEl.classList.remove('show');
+                // Disable button immediately to prevent double-clicks
+                startBtn.disabled = true;
+                startBtn.style.opacity = '0.6';
+                startBtn.style.cursor = 'not-allowed';
+                startBtn.innerHTML = '<span class="loading-spinner"></span> Starting...';
+
+                const response = await fetch('/api/live-trader/start', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        callQuantity: callQuantity,
+                        putQuantity: putQuantity
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    isRunning = true;
+                    // CRITICAL: Keep button disabled when engine is running
+                    startBtn.disabled = true;
+                    startBtn.style.opacity = '0.6';
+                    startBtn.style.cursor = 'not-allowed';
+                    startBtn.innerHTML = '<i class="fas fa-play"></i> Start Live Trader';
+                    stopBtn.disabled = false;
+                    stopBtn.style.opacity = '1';
+                    stopBtn.style.cursor = 'pointer';
+                    checkStatus(); // This will also ensure button stays disabled
+                    addLog('success', 'Live Trader started successfully!');
+                    
+                    // Ensure logs are being fetched every 3 seconds (tail -f behavior)
+                    if (logsInterval) {
+                        clearInterval(logsInterval);
+                    }
+                    logsInterval = setInterval(loadLogs, 3000);
+                    // Load logs immediately to show current state
+                    loadLogs();
+                } else {
+                    const errorMessage = data.error || 'Failed to start Live Trader';
+                    errorEl.textContent = errorMessage;
+                    errorEl.classList.add('show');
+                    
+                    // If error indicates missing API secret, show helpful message
+                    if (data.requires_api_secret || errorMessage.includes('API secret')) {
+                        // Show a more helpful message with link to authenticate
+                        errorEl.innerHTML = `
+                            <div style="margin-bottom: 8px;">${errorMessage}</div>
+                            <div style="font-size: 13px; margin-top: 8px;">
+                                <strong>Solution:</strong> Click on the <strong>"Authenticated"</strong> status badge at the top and provide your API secret when authenticating.
+                            </div>
+                        `;
+                    }
+                    // Verify engine status before re-enabling button
+                    try {
+                        const statusResponse = await fetch('/api/live-trader/status');
+                        if (statusResponse.ok) {
+                            const statusData = await statusResponse.json();
+                            if (!statusData.running) {
+                                // Engine is not running, safe to re-enable
+                                startBtn.disabled = false;
+                                startBtn.style.opacity = '1';
+                                startBtn.style.cursor = 'pointer';
+                            } else {
+                                // Engine is actually running, keep button disabled
+                                isRunning = true;
+                                startBtn.disabled = true;
+                                startBtn.style.opacity = '0.6';
+                                startBtn.style.cursor = 'not-allowed';
+                            }
+                        } else {
+                            // If status check fails, re-enable button
+                            if (!isRunning) {
+                                startBtn.disabled = false;
+                                startBtn.style.opacity = '1';
+                                startBtn.style.cursor = 'pointer';
+                            }
+                        }
+                    } catch (statusError) {
+                        // If status check fails, re-enable button only if not running
+                        if (!isRunning) {
+                            startBtn.disabled = false;
+                            startBtn.style.opacity = '1';
+                            startBtn.style.cursor = 'pointer';
+                        }
+                    }
+                    startBtn.innerHTML = '<i class="fas fa-play"></i> Start Live Trader';
+                }
+            } catch (error) {
+                console.error('Start error:', error);
+                errorEl.textContent = 'Error: ' + error.message;
+                errorEl.classList.add('show');
+                // Verify engine status before re-enabling button
+                try {
+                    const statusResponse = await fetch('/api/live-trader/status');
+                    if (statusResponse.ok) {
+                        const statusData = await statusResponse.json();
+                        if (!statusData.running && !isRunning) {
+                            startBtn.disabled = false;
+                            startBtn.style.opacity = '1';
+                            startBtn.style.cursor = 'pointer';
+                        } else {
+                            // Engine is running, keep button disabled
+                            isRunning = true;
+                            startBtn.disabled = true;
+                            startBtn.style.opacity = '0.6';
+                            startBtn.style.cursor = 'not-allowed';
+                        }
+                    } else {
+                        // If status check fails, re-enable only if not running
+                        if (!isRunning) {
+                            startBtn.disabled = false;
+                            startBtn.style.opacity = '1';
+                            startBtn.style.cursor = 'pointer';
+                        }
+                    }
+                } catch (statusError) {
+                    // If status check fails, re-enable only if not running
+                    if (!isRunning) {
+                        startBtn.disabled = false;
+                        startBtn.style.opacity = '1';
+                        startBtn.style.cursor = 'pointer';
+                    }
+                }
+                startBtn.innerHTML = '<i class="fas fa-play"></i> Start Live Trader';
+            }
+        }
+
+        async function stopLiveTrader() {
+            const stopBtn = document.getElementById('stopBtn');
+            const startBtn = document.getElementById('startBtn');
+
+            try {
+                stopBtn.disabled = true;
+                stopBtn.style.opacity = '0.6';
+                stopBtn.style.cursor = 'not-allowed';
+                stopBtn.innerHTML = '<span class="loading-spinner"></span> Stopping...';
+
+                const response = await fetch('/api/strategy/stop', {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    isRunning = false;
+                    // Re-enable start button
+                    startBtn.disabled = false;
+                    startBtn.style.opacity = '1';
+                    startBtn.style.cursor = 'pointer';
+                    // Disable stop button
+                    stopBtn.disabled = true;
+                    stopBtn.style.opacity = '0.6';
+                    stopBtn.style.cursor = 'not-allowed';
+                    stopBtn.innerHTML = '<i class="fas fa-stop"></i> Stop Live Trader';
+                    checkStatus(); // Refresh status to ensure UI is in sync
+                    addLog('warning', 'Live Trader stopped');
+                } else {
+                    // Re-enable stop button on error
+                    stopBtn.disabled = false;
+                    stopBtn.style.opacity = '1';
+                    stopBtn.style.cursor = 'pointer';
+                    stopBtn.innerHTML = '<i class="fas fa-stop"></i> Stop Live Trader';
+                    addLog('error', 'Error stopping Live Trader: ' + (data.message || 'Unknown error'));
+                    // Check actual status to ensure UI is correct
+                    checkStatus();
+                }
+            } catch (error) {
+                console.error('Stop error:', error);
+                // Re-enable stop button on error
+                stopBtn.disabled = false;
+                stopBtn.style.opacity = '1';
+                stopBtn.style.cursor = 'pointer';
+                stopBtn.innerHTML = '<i class="fas fa-stop"></i> Stop Live Trader';
+                addLog('error', 'Error stopping Live Trader: ' + error.message);
+                // Check actual status to ensure UI is correct
+                checkStatus();
+            }
+        }
+
+        async function loadLogs() {
+            try {
+                // Get logs from strategy process
+                const response = await fetch('/api/live-trader/logs');
+                const data = await response.json();
+                
+                const logsContainer = document.getElementById('logsContainer');
+                if (!logsContainer) return;
+                
+                if (data.success && data.logs && data.logs.length > 0) {
+                    // Check if user is at bottom before updating (more accurate calculation)
+                    const scrollThreshold = 100; // Pixels from bottom to consider "at bottom"
+                    const wasAtBottom = (logsContainer.scrollHeight - logsContainer.scrollTop - logsContainer.clientHeight) <= scrollThreshold;
+                    
+                    // Update user scroll state
+                    if (!wasAtBottom) {
+                        userScrolledUp = true;
+                    } else {
+                        userScrolledUp = false; // User is back at bottom
+                    }
+                    
+                    // Show log file path if available (only once)
+                    if (data.log_file_path && !logsContainer.querySelector('.log-path-info')) {
+                        const pathInfo = document.createElement('div');
+                        pathInfo.className = 'log-path-info';
+                        pathInfo.style.cssText = 'padding: 8px; background: rgba(59, 130, 246, 0.1); border-radius: 4px; margin-bottom: 8px; font-size: 12px; color: var(--text-secondary);';
+                        pathInfo.innerHTML = `<i class="fas fa-file-alt"></i> Log File: <code style="background: rgba(0,0,0,0.1); padding: 2px 6px; border-radius: 3px;">${data.log_file_path}</code>`;
+                        logsContainer.insertBefore(pathInfo, logsContainer.firstChild);
+                    }
+                    
+                    // On first load, show all logs
+                    if (isInitialLoad) {
+                        // Only clear if container has placeholder messages, otherwise preserve existing logs
+                        const hasOnlyPlaceholder = logsContainer.children.length === 0 || 
+                            (logsContainer.children.length === 1 && logsContainer.querySelector('.log-entry.info, .log-entry.error'));
+                        
+                        if (hasOnlyPlaceholder) {
+                            logsContainer.innerHTML = '';
+                        }
+                        
+                        // Re-add path info if not already present
+                        if (data.log_file_path && !logsContainer.querySelector('.log-path-info')) {
+                            const pathInfo = document.createElement('div');
+                            pathInfo.className = 'log-path-info';
+                            pathInfo.style.cssText = 'padding: 8px; background: rgba(59, 130, 246, 0.1); border-radius: 4px; margin-bottom: 8px; font-size: 12px; color: var(--text-secondary);';
+                            pathInfo.innerHTML = `<i class="fas fa-file-alt"></i> Log File: <code style="background: rgba(0,0,0,0.1); padding: 2px 6px; border-radius: 3px;">${data.log_file_path}</code>`;
+                            logsContainer.insertBefore(pathInfo, logsContainer.firstChild);
+                        }
+                        
+                        // Add all logs on first load (append, don't replace)
+                        data.logs.forEach(log => {
+                            const entry = parseLogEntry(log);
+                            logsContainer.appendChild(entry);
+                        });
+                        
+                        lastLogText = data.logs[data.logs.length - 1]; // Store last log
+                        isInitialLoad = false;
+                        
+                        // Scroll to bottom on first load (tail -f behavior)
+                        // Use requestAnimationFrame for smoother scrolling
+                        requestAnimationFrame(() => {
+                            logsContainer.scrollTop = logsContainer.scrollHeight;
+                            // Force scroll again after DOM update
+                            setTimeout(() => {
+                                logsContainer.scrollTop = logsContainer.scrollHeight;
+                            }, 50);
+                        });
+                        
+                        // Ensure logs continue to auto-refresh every 3 seconds
+                        if (!logsInterval) {
+                            logsInterval = setInterval(loadLogs, 3000);
+                        }
+                    } else {
+                        // On subsequent loads, only append new logs (tail behavior)
+                        let startIndex = 0;
+                        
+                        // Find where we left off
+                        if (lastLogText) {
+                            startIndex = data.logs.findIndex(log => log === lastLogText);
+                            if (startIndex === -1) {
+                                // Last log not found, might be a new file or cleared, start from end
+                                startIndex = Math.max(0, data.logs.length - 50); // Show last 50 if can't find
+                            } else {
+                                startIndex += 1; // Start from next log after last one we saw
+                            }
+                        }
+                        
+                        // Append only new logs
+                        const newLogs = data.logs.slice(startIndex);
+                        if (newLogs.length > 0) {
+                            newLogs.forEach(log => {
+                                const entry = parseLogEntry(log);
+                                logsContainer.appendChild(entry); // Always append to bottom
+                            });
+                            
+                            // Update last log text
+                            lastLogText = data.logs[data.logs.length - 1];
+                            
+                            // Limit to last 1000 logs to prevent memory issues
+                            const allLogEntries = logsContainer.querySelectorAll('.log-entry:not(.log-path-info)');
+                            if (allLogEntries.length > 1000) {
+                                const toRemove = allLogEntries.length - 1000;
+                                const pathInfo = logsContainer.querySelector('.log-path-info');
+                                for (let i = 0; i < toRemove; i++) {
+                                    // Remove from top (after path info)
+                                    if (pathInfo && pathInfo.nextSibling) {
+                                        pathInfo.nextSibling.remove();
+                                    } else if (logsContainer.firstChild && logsContainer.firstChild !== pathInfo) {
+                                        logsContainer.firstChild.remove();
+                                    }
+                                }
+                            }
+                            
+                            // Auto-scroll to bottom when new logs arrive (tail -f behavior like Notepad++)
+                            // Always scroll to bottom if auto-scroll is enabled and user was at bottom
+                            // If user scrolled up, still auto-scroll (true tail -f behavior)
+                            if (autoScrollEnabled) {
+                                // Tail mode: Always scroll to bottom when new logs arrive
+                                // Use requestAnimationFrame for smoother scrolling
+                                requestAnimationFrame(() => {
+                                    logsContainer.scrollTop = logsContainer.scrollHeight;
+                                    // Force scroll again after DOM update to ensure we're at bottom
+                                    setTimeout(() => {
+                                        logsContainer.scrollTop = logsContainer.scrollHeight;
+                                    }, 10);
+                                });
+                            } else if (wasAtBottom) {
+                                // Auto-scroll disabled but user was at bottom - scroll anyway
+                                requestAnimationFrame(() => {
+                                    logsContainer.scrollTop = logsContainer.scrollHeight;
+                                });
+                            }
+                        }
+                    }
+                } else if (data.success && data.logs && data.logs.length === 0) {
+                    // Don't clear existing logs - just show message if container is empty
+                    const logsContainer = document.getElementById('logsContainer');
+                    if (logsContainer) {
+                        const existingLogs = logsContainer.querySelectorAll('.log-entry:not(.log-path-info)');
+                        if (existingLogs.length === 0) {
+                            // Only show message if there are no logs at all
+                            let message = 'No logs available yet. ';
+                            if (data.message) {
+                                message += data.message + ' ';
+                            }
+                            message += 'Logs will appear here once the strategy starts running.';
+                            const infoDiv = document.createElement('div');
+                            infoDiv.className = 'log-entry info';
+                            infoDiv.innerHTML = `<span>${message}</span>`;
+                            logsContainer.appendChild(infoDiv);
+                        }
+                        // Don't reset isInitialLoad or lastLogText - preserve state
+                    }
+                    if (data.message) {
+                        console.log('[LOGS]', data.message);
+                    }
+                } else if (!data.success) {
+                    // Handle error case - display error logs if provided
+                    const logsContainer = document.getElementById('logsContainer');
+                    if (logsContainer) {
+                        // If error logs are provided, display them
+                        if (data.logs && data.logs.length > 0) {
+                            data.logs.forEach(logText => {
+                                const logEntry = parseLogEntry(logText);
+                                logsContainer.appendChild(logEntry);
+                            });
+                        } else {
+                            // Otherwise show error message
+                            let errorMsg = data.error || data.message || 'Error loading logs';
+                            const existingLogs = logsContainer.querySelectorAll('.log-entry:not(.log-path-info)');
+                            if (existingLogs.length === 0) {
+                                const errorDiv = document.createElement('div');
+                                errorDiv.className = 'log-entry error';
+                                errorDiv.innerHTML = `<span>Error: ${errorMsg}</span>`;
+                                logsContainer.appendChild(errorDiv);
+                            } else {
+                                // Add error as a new log entry instead of replacing
+                                const errorDiv = document.createElement('div');
+                                errorDiv.className = 'log-entry error';
+                                errorDiv.innerHTML = `<span>[ERROR] ${errorMsg}</span>`;
+                                logsContainer.appendChild(errorDiv);
+                            }
+                        }
+                        console.error('[LOGS] Error loading logs:', data.error);
+                    }
+                }
+                
+                // Display log file path if available
+                if (data.log_file_path && logsContainer) {
+                    // Remove existing path info if any
+                    const existingPathInfo = logsContainer.querySelector('.log-path-info');
+                    if (existingPathInfo) {
+                        existingPathInfo.remove();
+                    }
+                    
+                    // Add log file path info at the top
+                    const pathInfo = document.createElement('div');
+                    pathInfo.className = 'log-entry log-path-info';
+                    pathInfo.style.cssText = 'background: rgba(59, 130, 246, 0.1); border-left: 3px solid #3b82f6; padding: 8px; margin-bottom: 10px; font-weight: 500;';
+                    pathInfo.innerHTML = `<i class="fas fa-file-alt"></i> <strong>Log File:</strong> <code style="background: rgba(0,0,0,0.1); padding: 2px 6px; border-radius: 3px; font-family: monospace;">${data.log_file_path}</code>`;
+                    logsContainer.insertBefore(pathInfo, logsContainer.firstChild);
+                }
+                
+                // Display warning if using fallback logs
+                if (data.warning && logsContainer) {
+                    const existingWarning = logsContainer.querySelector('.log-warning-info');
+                    if (!existingWarning) {
+                        const warningDiv = document.createElement('div');
+                        warningDiv.className = 'log-entry log-warning-info warning';
+                        warningDiv.style.cssText = 'background: rgba(251, 191, 36, 0.1); border-left: 3px solid #fbbf24; padding: 8px; margin-bottom: 10px;';
+                        warningDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <strong>Warning:</strong> ${data.warning}`;
+                        const pathInfo = logsContainer.querySelector('.log-path-info');
+                        if (pathInfo) {
+                            pathInfo.insertAdjacentElement('afterend', warningDiv);
+                        } else {
+                            logsContainer.insertBefore(warningDiv, logsContainer.firstChild);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading logs:', error);
+            }
+        }
+
+        function parseLogEntry(logText) {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            
+            // Extract timestamp from log line if present (format: YYYY-MM-DD HH:MM:SS,mmm)
+            let timestamp = '';
+            let logMessage = logText;
+            
+            // Try to parse timestamp from log format: "2025-12-09 10:32:00,048 - INFO - ..."
+            const timestampMatch = logText.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})/);
+            if (timestampMatch) {
+                timestamp = timestampMatch[1].replace(',', '.');
+                // Extract the actual log message (everything after timestamp and level)
+                const messageMatch = logText.match(/^.*? - \w+ - (.*)$/);
+                if (messageMatch) {
+                    logMessage = messageMatch[1];
+                } else {
+                    // If pattern doesn't match, show full log
+                    logMessage = logText;
+                }
+            } else {
+                // Fallback to current time if no timestamp in log
+                timestamp = new Date().toLocaleTimeString();
+            }
+            
+            const timestampSpan = document.createElement('span');
+            timestampSpan.className = 'log-timestamp';
+            timestampSpan.textContent = `[${timestamp}]`;
+            
+            const textSpan = document.createElement('span');
+            textSpan.textContent = logMessage || logText;
+            
+            // Determine log level from log text
+            const logLower = logText.toLowerCase();
+            if (logLower.includes('error') || logLower.includes('critical') || logLower.includes('exception')) {
+                entry.className += ' error';
+            } else if (logLower.includes('warning') || logLower.includes('warn')) {
+                entry.className += ' warning';
+            } else if (logLower.includes('success') || logLower.includes('started') || logLower.includes('completed')) {
+                entry.className += ' success';
+            } else if (logLower.includes('info')) {
+                entry.className += ' info';
+            } else {
+                entry.className += ' info'; // Default to info
+            }
+            
+            entry.appendChild(timestampSpan);
+            entry.appendChild(textSpan);
+            
+            return entry;
+        }
+
+        function updateAccountNameDisplay(accountName) {
+            if (!accountName) return;
+            
+            const headerTitle = document.querySelector('.header-title');
+            if (!headerTitle) return;
+            
+            let accountNameDisplay = headerTitle.querySelector('.account-name-display');
+            if (accountNameDisplay) {
+                // Update existing display
+                const span = accountNameDisplay.querySelector('span') || accountNameDisplay;
+                if (span) {
+                    span.textContent = accountName;
+                }
+            } else {
+                // Create new display
+                accountNameDisplay = document.createElement('span');
+                accountNameDisplay.className = 'account-name-display';
+                accountNameDisplay.style.cssText = 'margin-left: 15px; font-size: 1.1em; color: var(--text-secondary);';
+                accountNameDisplay.innerHTML = `<i class="fas fa-user"></i> ${accountName}`;
+                headerTitle.appendChild(accountNameDisplay);
+            }
+        }
+        
+        function addLog(level, message) {
+            const logsContainer = document.getElementById('logsContainer');
+            const entry = parseLogEntry(message);
+            logsContainer.appendChild(entry);
+            // Always scroll to bottom when adding log (tail -f behavior)
+            if (autoScrollEnabled) {
+                requestAnimationFrame(() => {
+                    logsContainer.scrollTop = logsContainer.scrollHeight;
+                });
+            }
+        }
+        
+        function handleLogScroll() {
+            // Track if user manually scrolled up
+            const logsContainer = document.getElementById('logsContainer');
+            if (!logsContainer) return;
+            
+            const scrollThreshold = 100;
+            const isAtBottom = (logsContainer.scrollHeight - logsContainer.scrollTop - logsContainer.clientHeight) <= scrollThreshold;
+            
+            if (!isAtBottom) {
+                userScrolledUp = true;
+            } else {
+                userScrolledUp = false;
+            }
+        }
+
+        function refreshLogs() {
+            // Reset to force full refresh when manually refreshing
+            isInitialLoad = true;
+            lastLogText = null;
+            loadLogs();
+            // Ensure auto-refresh interval is running
+            if (!logsInterval) {
+                logsInterval = setInterval(loadLogs, 3000);
+            }
+        }
+        
+        function showAuthModal() {
+            // Redirect to main dashboard for authentication
+            window.location.href = '/';
+        }
+    </script>
+</body>
+</html>
+

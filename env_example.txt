@@ -1,0 +1,15 @@
+# Kite Connect API Credentials
+# Copy this file to .env and fill in your actual credentials
+
+KITE_API_KEY=your_api_key_here
+KITE_API_SECRET=your_api_secret_here
+KITE_REQUEST_TOKEN=your_request_token_here
+KITE_ACCOUNT=your_account_here
+
+# Azure Blob Storage Configuration for Logs
+# These environment variables must be set in Azure App Service Configuration (not in .env file)
+# Required in Azure:
+#   - AzureBlobStorageKey: Azure Blob Storage account key (connection string is constructed automatically)
+#   - AZURE_BLOB_ACCOUNT_NAME: Storage account name (e.g., s0001strangle)
+#   - AZURE_BLOB_CONTAINER_NAME: Container name for logs (e.g., s0001strangle)
+#   - AZURE_BLOB_LOGGING_ENABLED: Enable/disable Azure Blob logging (True/False)

@@ -1,0 +1,299 @@
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                    OPTIONS TRADING BOT - COMPLETE FLOW DIAGRAM                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   USER INPUT    │    │  WEB INTERFACE  │    │  COMMAND LINE   │
+│                 │    │    (app.py)     │    │   (main.py)     │
+└─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
+          │                      │                      │
+          └──────────────────────┼──────────────────────┘
+                                 │
+                    ┌─────────────▼─────────────┐
+                    │    INITIALIZATION         │
+                    │  ┌─────────────────────┐  │
+                    │  │  KiteConnect Setup  │  │
+                    │  │  Logging Setup      │  │
+                    │  │  Component Init     │  │
+                    │  └─────────────────────┘  │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │    MARKET ANALYSIS        │
+                    │  ┌─────────────────────┐  │
+                    │  │  VIX Analysis       │  │
+                    │  │  Strategy Selection │  │
+                    │  │  Delta Range Set    │  │
+                    │  └─────────────────────┘  │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │  GREEKS SENTIMENT         │
+                    │  ┌─────────────────────┐  │
+                    │  │ Master Copy (Daily) │  │
+                    │  │ Live Copy (3 min)   │  │
+                    │  │ Sentiment Calc      │  │
+                    │  └─────────────────────┘  │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │   TRADING EXECUTION       │
+                    │  ┌─────────────────────┐  │
+                    │  │ Market Time Check   │  │
+                    │  │ Strike Selection    │  │
+                    │  │ Initial Orders      │  │
+                    │  └─────────────────────┘  │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │   MONITORING LOOP         │
+                    │  ┌─────────────────────┐  │
+                    │  │ Market Close?       │  │
+                    │  │ Profit Booking?     │  │
+                    │  │ Stop-Loss Trigger?  │  │
+                    │  │ Hedge Condition?    │  │
+                    │  └─────────────────────┘  │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │     HEDGE MANAGEMENT      │
+                    │  ┌─────────────────────┐  │
+                    │  │ Calendar: 4 Points  │  │
+                    │  │ Strangle: 6 Points  │  │
+                    │  │ Next Week Expiry    │  │
+                    │  │ Same Week Expiry    │  │
+                    │  └─────────────────────┘  │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────▼─────────────┐
+                    │      EXIT CONDITIONS      │
+                    │  ┌─────────────────────┐  │
+                    │  │ Profit Booking      │  │
+                    │  │ Max Stop-Loss       │  │
+                    │  │ Market Close        │  │
+                    │  │ Graceful Exit       │  │
+                    │  └─────────────────────┘  │
+                    └───────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              DETAILED FLOW BREAKDOWN                            │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────┐
+│   VIX ANALYSIS  │
+└─────────┬───────┘
+          │
+          ▼
+┌─────────────────┐    ┌─────────────────┐
+│ VIX < 20        │    │ VIX >= 20       │
+│ Calendar        │    │ Strangle        │
+│ Delta: 0.15-0.25│    │ Delta: 0.29-0.35│
+│ Hedge: 4 Points │    │ Hedge: 6 Points │
+│ Next Week Expiry│    │ Same Week Expiry│
+└─────────┬───────┘    └─────────┬───────┘
+          │                      │
+          └──────────┬───────────┘
+                     │
+                     ▼
+┌─────────────────────────────────┐
+│        STRIKE SELECTION         │
+│  ┌─────────────────────────────┐│
+│  │ Find Call Strike (Delta)    ││
+│  │ Find Put Strike (Delta)     ││
+│  │ Calculate Total Premium     ││
+│  └─────────────────────────────┘│
+└─────────────────┬───────────────┘
+                  │
+                  ▼
+┌─────────────────────────────────┐
+│      INITIAL ORDER PLACEMENT    │
+│  ┌─────────────────────────────┐│
+│  │ Place Call Sell Order       ││
+│  │ Place Put Sell Order        ││
+│  │ Set Stop-Loss Orders        ││
+│  └─────────────────────────────┘│
+└─────────────────┬───────────────┘
+                  │
+                  ▼
+┌─────────────────────────────────┐
+│       MONITORING LOOP           │
+│  ┌─────────────────────────────┐│
+│  │ Check Market Close (14:45)  ││
+│  │ Check Profit Booking        ││
+│  │ Check Stop-Loss Triggers    ││
+│  │ Check Hedge Conditions      ││
+│  │ Update Greeks Sentiment     ││
+│  └─────────────────────────────┘│
+└─────────────────┬───────────────┘
+                  │
+                  ▼
+┌─────────────────────────────────┐
+│        HEDGE LOGIC              │
+│  ┌─────────────────────────────┐│
+│  │ Calendar: 4 Points Loss     ││
+│  │ Strangle: 6 Points Loss     ││
+│  │ Find Hedge Strikes          ││
+│  │ Place Hedge Buy Orders      ││
+│  │ Set hedge_taken = True      ││
+│  └─────────────────────────────┘│
+└─────────────────┬───────────────┘
+                  │
+                  ▼
+┌─────────────────────────────────┐
+│        EXIT CONDITIONS          │
+│  ┌─────────────────────────────┐│
+│  │ Initial Profit (14 pts)     ││
+│  │ Second Profit (28 pts)      ││
+│  │ Max Stop-Loss (3 triggers)  ││
+│  │ Market Close (14:45)        ││
+│  │ Modify Stop-Loss Orders     ││
+│  │ Graceful Exit               ││
+│  └─────────────────────────────┘│
+└─────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                            GREEKS SENTIMENT ANALYSIS                            │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────┐
+│   MARKET OPEN   │
+│   (9:15 AM)     │
+└─────────┬───────┘
+          │
+          ▼
+┌─────────────────┐
+│  MASTER COPY    │
+│  ┌─────────────┐│
+│  │ NIFTY       ││
+│  │ BANKNIFTY   ││
+│  │ FINNIFTY    ││
+│  │ Calculate   ││
+│  │ Greeks      ││
+│  │ Store JSON  ││
+│  └─────────────┘│
+└─────────┬───────┘
+          │
+          ▼
+┌─────────────────┐
+│  EVERY 3 MIN    │
+│  ┌─────────────┐│
+│  │ Fetch Live  ││
+│  │ Greeks Data ││
+│  │ Calculate   ││
+│  │ Differences ││
+│  │ Determine   ││
+│  │ Sentiment   ││
+│  │ Display     ││
+│  │ Table       ││
+│  └─────────────┘│
+└─────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              SENTIMENT RULES                                   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   DIFFERENCE    │    │   SENTIMENT     │    │   COLOR CODE    │
+│                 │    │                 │    │                 │
+│ > +5            │───▶│   BULLISH       │───▶│     GREEN       │
+│                 │    │                 │    │                 │
+│ -5 to +5        │───▶│   NEUTRAL       │───▶│     WHITE       │
+│                 │    │                 │    │                 │
+│ < -5            │───▶│   BEARISH       │───▶│     RED         │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              FILE STRUCTURE                                    │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────┐
+│   ENTRY POINTS  │
+└─────────┬───────┘
+          │
+          ├─── main.py (CLI)
+          ├─── app.py (Web UI)
+          ├─── run_trading_bot.py (Runner)
+          └─── Straddle10PointswithSL-Limit.py (Standalone)
+          │
+          ▼
+┌─────────────────┐
+│   CORE MODULES  │
+└─────────┬───────┘
+          │
+          ├─── src/trading_bot.py (Main Bot)
+          ├─── src/kite_client.py (API Wrapper)
+          ├─── src/options_calculator.py (Strike Logic)
+          ├─── src/vix_calculator.py (VIX Analysis)
+          ├─── src/vix_delta_manager.py (Delta Management)
+          └─── src/greeks_sentiment_analyzer.py (Sentiment)
+          │
+          ▼
+┌─────────────────┐
+│   DATA FILES    │
+└─────────┬───────┘
+          │
+          ├─── config.py (Configuration)
+          ├─── data/greeks_master_copy.json (Daily Baseline)
+          ├─── data/greeks_live_data.json (Live Data)
+          └─── Log/ (Trading Logs)
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              EXECUTION TIMELINE                                │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+09:15 AM ── Market Open ── Master Copy Creation
+09:30 AM ── Trading Start ── Initial Orders
+09:33 AM ── First Sentiment Analysis
+09:36 AM ── Second Sentiment Analysis
+09:39 AM ── Third Sentiment Analysis
+    │
+    │ (Continue every 3 minutes)
+    │
+14:45 PM ── Market Close ── Graceful Exit
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              ERROR HANDLING                                    │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────┐
+│   API ERRORS    │
+└─────────┬───────┘
+          │
+          ├─── Connection Retry
+          ├─── Graceful Degradation
+          └─── Error Logging
+          │
+          ▼
+┌─────────────────┐
+│  MARKET CLOSE   │
+└─────────┬───────┘
+          │
+          ├─── Race Condition Fix
+          ├─── Early Exit Protection
+          └─── Order Validation
+          │
+          ▼
+┌─────────────────┐
+│  HEDGE ERRORS   │
+└─────────┬───────┘
+          │
+          ├─── Duplication Prevention
+          ├─── Single Attempt Flag
+          └─── Continue on Failure
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              SUCCESS CRITERIA                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+✅ VIX-Based Strategy Selection
+✅ Dynamic Delta Ranges
+✅ Calendar vs Strangle Logic
+✅ Greeks Sentiment Analysis
+✅ Comprehensive Error Handling
+✅ Market Close Protection
+✅ Profit Booking Automation
+✅ Stop-Loss Management
+✅ Hedge Duplication Prevention
+✅ Real-time Monitoring
+✅ Graceful Exit Conditions
+✅ Comprehensive Logging

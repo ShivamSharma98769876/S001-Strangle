@@ -1,0 +1,289 @@
+[33mcommit 9c723a1d2f7fd17db343db5a4a144483022c4c1e[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mbackup-before-github-fix-2[m[33m, [m[1;32mbackup-before-github-fix[m[33m)[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Fri Dec 12 20:48:14 2025 +0530
+
+    Add or update the Azure App Service build and deployment workflow config
+
+[33mcommit bfd8eda5d088b93a90a0a01a1aebf9d921560c28[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Fri Dec 12 20:37:11 2025 +0530
+
+    Add or update the Azure App Service build and deployment workflow config
+
+[33mcommit 869554d65efeef12822e43041ece7519b3239377[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Fri Dec 12 20:31:51 2025 +0530
+
+    Add or update the Azure App Service build and deployment workflow config
+
+[33mcommit c01c7f76cfa97068b7a97b7e2f602af9f5d2cee7[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Fri Dec 12 20:30:11 2025 +0530
+
+    Issue in Connecting-4
+
+[33mcommit 8d98b11858648b696b332d8457b5ada4ce5f683b[m
+Merge: be52148 cac7271
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Fri Dec 12 20:18:50 2025 +0530
+
+    Issue in Connecting-4
+
+[33mcommit be52148785a3389b9d68382cb412cf5c16b4f09a[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Fri Dec 12 20:17:19 2025 +0530
+
+    Issue in Connecting-4
+
+[33mcommit 03f18e6aa37ab93446d2f93cc3314b692ee19895[m[33m ([m[1;35mrefs/stash[m[33m)[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Fri Dec 12 19:29:57 2025 +0530
+
+    WIP on main: 17b40c4 Issue in Connecting-4
+
+[33mcommit 84a00eb14953cb0fe01179dcb5220c0d5253d25e[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Fri Dec 12 19:21:11 2025 +0530
+
+    Issue in Connecting-4
+
+[33mcommit 95ffa81db28dca3de58f17647851a40197ff49ef[m[33m ([m[1;31morigin/backup-before-secret-removal[m[33m, [m[1;32mbackup-before-secret-removal[m[33m)[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Fri Dec 12 19:04:10 2025 +0530
+
+    Issue in Connecting-4
+
+[33mcommit 80e8c4ea2a39a6ce39834bfaf394a24bf4457136[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Fri Dec 12 18:57:34 2025 +0530
+
+    Commite the changes
+
+[33mcommit d496bf0553bd7c72204f3b96f29d7bc1038ee5ca[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Fri Dec 12 18:48:49 2025 +0530
+
+    commithhhhhhhhhhkkjk
+
+[33mcommit 0309aebf5f8938fa852efd8e61e6e1d1e40d2e3d[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Fri Dec 12 18:37:37 2025 +0530
+
+    Remove hardcoded Azure Blob connection string - use .env instead
+
+[33mcommit aeea124ad2a3dd192475f58d1953dc9970a7b185[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Fri Dec 12 18:33:13 2025 +0530
+
+    Issue in Connecting-4
+
+[33mcommit 28bfc7eaad13fa1e150eb078b978e7834a9ee1de[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Fri Dec 12 18:26:20 2025 +0530
+
+    Issue in cred
+
+[33mcommit cac727195ad0e1d8a2f87a810fb2c1f5ef69beb6[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 23:00:35 2025 +0530
+
+    Issue in cred
+
+[33mcommit a656f2cb9b7b92c40eba7fc6ecd7010752a1b15c[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 22:35:10 2025 +0530
+
+    Issue in cred
+
+[33mcommit 4659f4a771f0eb7458b35e008e27a6c42bb7ff2c[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 22:21:11 2025 +0530
+
+    Issue in cred
+
+[33mcommit 46515553692a034886f85ba019606d75dd6404f6[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 21:53:50 2025 +0530
+
+    Issue in cred
+
+[33mcommit 570ff7686e11fd318f65a71312a4cfcf6313c877[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 21:36:28 2025 +0530
+
+    Issue in cred
+
+[33mcommit 666e6969f896f1e56d8635c41473d7a9611b630e[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 19:47:05 2025 +0530
+
+    Issue in cred
+
+[33mcommit 5eab9e0e04852383812a21f42abaa66a92d0fd98[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 19:28:37 2025 +0530
+
+    Issue in cred
+
+[33mcommit ada61cad4e0d3fc2a548e0a958f80cfbc8f16d7f[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 19:16:57 2025 +0530
+
+    Issue in Connecting-4
+
+[33mcommit 6944ce25d8036259057060f33a71bda0e1e3a5ad[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 14:38:29 2025 +0530
+
+    Issue in Connecting-4
+
+[33mcommit c1c21ee90a59d6806612620f998e40f6ca4c303d[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 14:04:39 2025 +0530
+
+    Issue in Connecting-4
+
+[33mcommit 87c517bdc6dc0e1510a47dad4e99b76585ef53c1[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 13:47:08 2025 +0530
+
+    Issue in Connecting-4
+
+[33mcommit f1aed167ade9fca4ab3f14117f443435b4753c83[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 13:16:40 2025 +0530
+
+    Issue in cred
+
+[33mcommit ecd8dbd561f432fd73c33a2f7a67a1c6d5d12bc9[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 12:43:31 2025 +0530
+
+    Issue in Connecting-4
+
+[33mcommit d25985008ef5ff3dce7af537b953a4eeccfccab7[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 12:18:04 2025 +0530
+
+    Issue in log issue
+
+[33mcommit 9f55b890278d865b6d8844c89716de41ec8ca990[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 11:24:12 2025 +0530
+
+    Issue in log and Qty s
+
+[33mcommit 19b3a6fc17ac02ca9c85cf8f0acdd4cdb8137122[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 09:23:39 2025 +0530
+
+    Issue in Connecting-4
+
+[33mcommit 9a11b2c1b0adcb61ca1773beeddbe8e2180b9626[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 08:57:42 2025 +0530
+
+    Issue in Connection Status
+
+[33mcommit 47e3827f0bb8cd665416c9f6b441beeba6f24dc4[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Thu Dec 11 00:08:46 2025 +0530
+
+    Issue in Connecting-3
+
+[33mcommit a3b0ee8f8afc9b517f45bf9aff0de4ba8c9fe770[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Wed Dec 10 23:56:14 2025 +0530
+
+    Issue in Connecting-2
+
+[33mcommit d8b59044459a93465285769a9d88ccd10b4577e9[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Wed Dec 10 23:19:31 2025 +0530
+
+    Issue in Connecting
+
+[33mcommit 98a69f28657c62c76ff340a82c52bbc45127398b[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Wed Dec 10 22:59:20 2025 +0530
+
+    Removed Sentiment code and credential banner
+
+[33mcommit b8fe4f05f2b9eff55d633490691c7b1091e66f6b[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Wed Dec 10 22:06:54 2025 +0530
+
+    Add Azure cloud landing page
+
+[33mcommit 26108650bbedc0ef4ec3bc157d58659fd255dc8d[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Wed Dec 10 09:04:14 2025 +0530
+
+    Changes for Azure
+
+[33mcommit 46cdd26b28b903cb81970115406418ce3b597a17[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Tue Dec 9 23:01:51 2025 +0530
+
+    IP Changes in Startfile
+
+[33mcommit 9df394befd92d563a0f7300b79cfcfe487f3c318[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Tue Dec 9 22:45:09 2025 +0530
+
+    Consol input commented
+
+[33mcommit c0b81bc826d98c1b7392e3386a58c442ce816491[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Tue Dec 9 22:30:30 2025 +0530
+
+    Consol input commented
+
+[33mcommit fdb5ea17dfde6af8bdc08ff83d95e0095c0b4f1f[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Tue Dec 9 22:11:01 2025 +0530
+
+    Dashboard ip changed
+
+[33mcommit cb42a747055a275be5dc3f74fef91810525a4811[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Tue Dec 9 21:59:16 2025 +0530
+
+    Add or update the Azure App Service build and deployment workflow config
+
+[33mcommit 2210510125ac37c12c86c94d5d066cba31bb3c28[m
+Merge: 974035d 2938dcc
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Tue Dec 9 21:45:50 2025 +0530
+
+    Merge branch 'main' of https://github.com/ShivamSharma98769876/S001
+
+[33mcommit 974035d9bce6997cb6a28f15bf09a97c8f21565e[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Tue Dec 9 21:44:19 2025 +0530
+
+    Dashboard Added
+
+[33mcommit 2938dccf06d69cce680aa1fac199934260a1ca70[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Tue Dec 9 17:27:46 2025 +0530
+
+    Add or update the Azure App Service build and deployment workflow config
+
+[33mcommit e66d61fdd1a67035c99a899bfd158518ff446b84[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Tue Dec 9 16:26:02 2025 +0530
+
+    Add or update the Azure App Service build and deployment workflow config
+
+[33mcommit a561c6160c44d049dc4827b60b0f4ecd6ce9a6bf[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Tue Dec 9 11:23:33 2025 +0530
+
+    Rmove extr files
+
+[33mcommit bc0ce6cee4fd1221c04eb96abda78441ac557bc2[m
+Author: ShivamSharma98769876 <nimblegrowthoptions@gmail.com>
+Date:   Tue Dec 9 11:16:46 2025 +0530
+
+    first commit

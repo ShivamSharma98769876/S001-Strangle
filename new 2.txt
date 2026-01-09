@@ -1,0 +1,32 @@
+https://www.nseindia.com/option-chain?symbolCode=-10006&symbol=NIFTY&symbol=NIFTY&instrument=-&date=-&segmentLink=17&symbolCount=2&segmentLink=17
+https://www.nseindia.com/api/option-chain-indices?symbol=BANKNIFTY
+
+https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY
+https://www.nseindia.com/option-chain?symbolCode=-10006&symbol=NIFTY&symbol=NIFTY&instrument=-&date=-&segmentLink=17&symbolCount=2&segmentLink=17
+
+https://www.youtube.com/watch?v=f3KBOxDY_qo&t=5s
+
+Supercharge Your Trading with Powerful Automation!
+
+Dive into the future of trading with this all-in-one guide where technology meets strategy. In this video, discover how to harness the power of automation for smarter, faster trades—whether you’re a developer, trader, or finance enthusiast!
+
+What's Inside:
+
+Kite App Development Made Easy:
+Learn how to build, set up, and optimize your own Kite App for seamless algo  trading.
+
+Automate Options Greek Analysis:
+See how cutting-edge tools can analyze options Greeks in real time, turning complex data into clear market sentiment signals for better decision making.
+
+Strangle & Calendar Strategies—On Autopilot:
+Explore smart algorithms that automate these popular options strategies, including preset entries, stop loss, automatic re-entry, and stress-free exits to maximize your profits.
+
+Next-Level CPR Strategy Automation:
+Unlock the full power of Central Pivot Range trading with automated setups—never miss a breakout or reversal again!
+
+Why Watch?
+This video is your gateway to trading with precision, confidence, and minimal manual effort. Subscribe now for expert tips, full-stack tutorials, and advanced strategies—all backed by live demos and code snippets!
+
+👉 Power up your portfolio! Hit LIKE and SHARE, and let me know your questions in the comments.
+
+#AlgoTrading #KiteApp #OptionGreeks #TradingAutomation #StrangleStrategy #CalendarStrategy #CPRStrategy #StockMarket #elearnMarket

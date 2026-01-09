@@ -1,0 +1,3006 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S001</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Theme Toggle Button */
+        .theme-toggle {
+            position: relative;
+            width: 50px;
+            height: 26px;
+            background: var(--border-color, #e2e8f0);
+            border-radius: 13px;
+            cursor: pointer;
+            transition: background 0.3s;
+            border: none;
+            padding: 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .theme-toggle:hover {
+            background: var(--text-secondary, #64748b);
+        }
+
+        .theme-toggle-slider {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.3s;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            left: 3px;
+        }
+
+        [data-theme="dark"] .theme-toggle {
+            background: var(--primary-color, #2563eb);
+        }
+
+        [data-theme="dark"] .theme-toggle-slider {
+            transform: translateX(24px);
+        }
+
+        .theme-toggle-icon {
+            position: absolute;
+            font-size: 12px;
+            transition: opacity 0.3s;
+        }
+
+        .theme-toggle-icon.sun {
+            left: 6px;
+            color: #f59e0b;
+        }
+
+        .theme-toggle-icon.moon {
+            right: 6px;
+            color: #f1f5f9;
+        }
+
+        [data-theme="light"] .theme-toggle-icon.moon {
+            opacity: 0;
+        }
+
+        [data-theme="dark"] .theme-toggle-icon.sun {
+            opacity: 0;
+        }
+
+        /* Dark Theme Variables */
+        [data-theme="dark"] {
+            --primary-color: #3b82f6;
+            --success-color: #10b981;
+            --danger-color: #ef4444;
+            --warning-color: #f59e0b;
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --border-color: #334155;
+            --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 1px 2px 0 rgba(0, 0, 0, 0.2);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+        }
+
+        [data-theme="dark"] body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+        }
+
+        [data-theme="dark"] .card {
+            background: var(--card-bg);
+            border-color: var(--border-color);
+        }
+
+        [data-theme="dark"] .header {
+            background: var(--card-bg);
+            border-color: var(--border-color);
+        }
+    </style>
+    <style>
+        :root {
+            /* Dark Theme (Default) */
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-tertiary: #0f172a;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-tertiary: #64748b;
+            --border-color: #334155;
+            --card-shadow: rgba(0, 0, 0, 0.3);
+            --hover-bg: #475569;
+        }
+        
+        body.light-theme {
+            /* Light Theme */
+            --bg-primary: #f8fafc;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #f1f5f9;
+            --text-primary: #1e293b;
+            --text-secondary: #475569;
+            --text-tertiary: #64748b;
+            --border-color: #e2e8f0;
+            --card-shadow: rgba(0, 0, 0, 0.1);
+            --hover-bg: #f1f5f9;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 20px;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+        
+        .dashboard-container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+        
+        /* Header */
+        .header {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 20px 30px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 6px var(--card-shadow);
+            transition: background-color 0.3s ease;
+        }
+        
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .header-title h1 {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        
+        .header-title .icon {
+            font-size: 28px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .header-btn {
+            background: var(--border-color);
+            border: none;
+            color: var(--text-primary);
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .header-btn:hover {
+            background: var(--hover-bg);
+            transform: translateY(-1px);
+        }
+        
+        .header-btn.primary {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .header-btn.success {
+            background: #10b981;
+            color: white;
+        }
+        
+        .header-btn.danger {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-dot.connected {
+            background: #ef4444;
+        }
+        
+        .status-dot.authenticated {
+            background: #10b981;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        /* Description Box */
+        .description-box {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+            transition: background-color 0.3s ease;
+        }
+        
+        .description-box p {
+            color: var(--text-secondary);
+            line-height: 1.6;
+            font-size: 14px;
+        }
+        
+        /* Metrics Grid */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .metric-card {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 6px var(--card-shadow);
+            transition: transform 0.2s, box-shadow 0.2s, background-color 0.3s ease;
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px var(--card-shadow);
+        }
+        
+        .metric-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        
+        .metric-title {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .metric-value {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        
+        .metric-value.positive {
+            color: #10b981;
+        }
+        
+        .metric-value.negative {
+            color: #ef4444;
+        }
+        
+        .metric-value.neutral {
+            color: var(--text-primary);
+        }
+        
+        .metric-subtext {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            margin-top: 4px;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 12px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ef4444 0%, #f87171 100%);
+            transition: width 0.3s;
+        }
+        
+        .progress-text {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+        
+        /* Sections */
+        .section {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px var(--card-shadow);
+            transition: background-color 0.3s ease;
+        }
+        
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .section-controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .btn-success {
+            background: #10b981;
+            color: white;
+        }
+        
+        .btn-warning {
+            background: #f59e0b;
+            color: white;
+        }
+        
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+        
+        .badge {
+            background: #3b82f6;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        
+        /* Table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+        
+        thead {
+            background: var(--bg-tertiary);
+        }
+        
+        th {
+            padding: 12px;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 2px solid var(--border-color);
+        }
+        
+        td {
+            padding: 12px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+        
+        tr:hover {
+            background: var(--bg-tertiary);
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-tertiary);
+        }
+        
+        /* Summary Card */
+        .summary-card {
+            background: var(--bg-tertiary);
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+            transition: background-color 0.3s ease, border-color 0.3s ease;
+        }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 20px;
+        }
+        
+        .summary-item {
+            text-align: center;
+        }
+        
+        .summary-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        
+        .summary-value {
+            font-size: 24px;
+            font-weight: 700;
+        }
+        
+        .summary-value.positive {
+            color: #10b981;
+        }
+        
+        .summary-value.negative {
+            color: #ef4444;
+        }
+        
+        /* Chart Container */
+        .chart-container {
+            background: var(--bg-tertiary);
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 20px;
+            height: 400px;
+            transition: background-color 0.3s ease;
+        }
+        
+        /* Filters */
+        .filters {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .filter-input {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: background-color 0.3s ease, border-color 0.3s ease;
+        }
+        
+        .filter-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-primary);
+            font-size: 14px;
+            cursor: pointer;
+        }
+        
+        /* Toggle Switch */
+        .toggle-switch {
+            position: relative;
+            width: 50px;
+            height: 24px;
+        }
+        
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--border-color);
+            transition: .4s;
+            border-radius: 24px;
+        }
+        
+        /* Theme Toggle Button */
+        .theme-toggle {
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 6px;
+            transition: background-color 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .theme-toggle:hover {
+            background-color: var(--hover-bg);
+        }
+        
+        .theme-toggle i {
+            color: var(--text-secondary);
+            font-size: 18px;
+            transition: color 0.2s;
+        }
+        
+        .theme-icon {
+            color: var(--text-tertiary) !important;
+        }
+        
+        /* Authentication Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 10000;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(4px);
+        }
+        
+        .modal-overlay.active {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: var(--bg-secondary);
+            padding: 30px;
+            border-radius: 12px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--border-color);
+        }
+        
+        .modal-content h2 {
+            margin-top: 0;
+            margin-bottom: 20px;
+            color: var(--text-primary);
+            font-size: 24px;
+        }
+        
+        .auth-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid var(--border-color);
+        }
+        
+        .auth-tab {
+            flex: 1;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            border: none;
+            border-radius: 6px 6px 0 0;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .auth-tab.active {
+            background: var(--primary-color, #3b82f6);
+            color: white;
+        }
+        
+        .auth-tab:hover:not(.active) {
+            background: var(--hover-bg);
+        }
+        
+        .auth-form {
+            display: none;
+        }
+        
+        .auth-form.active {
+            display: block;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: monospace;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            transition: border-color 0.2s;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .form-group small {
+            color: var(--text-secondary);
+            margin-top: 5px;
+            display: block;
+            font-size: 12px;
+        }
+        
+        .form-group a {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+        
+        .form-group a:hover {
+            text-decoration: underline;
+        }
+        
+        .auth-error {
+            color: #ef4444;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: rgba(239, 68, 68, 0.1);
+            border-radius: 6px;
+            display: none;
+        }
+        
+        .auth-error.show {
+            display: block;
+        }
+        
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .modal-actions button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .modal-actions .btn-primary {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .modal-actions .btn-primary:hover {
+            background: #2563eb;
+        }
+        
+        .modal-actions .btn-secondary {
+            background: var(--border-color);
+            color: var(--text-primary);
+        }
+        
+        .modal-actions .btn-secondary:hover {
+            background: var(--hover-bg);
+        }
+        
+        .status-badge {
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .status-badge.connected {
+            background: #10b981;
+            color: white;
+        }
+        
+        .status-badge.disconnected {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .status-badge.authenticated {
+            background: #10b981;
+            color: white;
+        }
+        
+        .status-badge.not-authenticated {
+            background: #ef4444;
+            color: white;
+        }
+        
+        /* Admin Panel Styles */
+        .admin-modal-content {
+            max-width: 1200px !important;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        
+        .admin-section {
+            margin-bottom: 32px;
+            padding: 24px;
+            background: var(--card-bg);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+        }
+        
+        .admin-section-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .admin-section-title i {
+            color: var(--primary-color);
+        }
+        
+        .admin-params-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        
+        .admin-param-group {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .admin-param-group label {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        
+        .admin-param-group input {
+            padding: 10px 14px;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-color);
+            color: var(--text-primary);
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        .admin-param-group input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        .admin-param-group small {
+            margin-top: 6px;
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+        
+        .status-badge:hover:not(.connected):not(.authenticated) {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+        
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+        }
+        
+        .modal-overlay {
+            animation: fadeIn 0.2s ease-out;
+        }
+        
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+        
+        .modal-content {
+            animation: modalSlideIn 0.3s ease-out;
+        }
+        
+        @keyframes modalSlideIn {
+            from {
+                transform: scale(0.9) translateY(-20px);
+                opacity: 0;
+            }
+            to {
+                transform: scale(1) translateY(0);
+                opacity: 1;
+            }
+        }
+        
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .toggle-slider {
+            background-color: #3b82f6;
+        }
+        
+        input:checked + .toggle-slider:before {
+            transform: translateX(26px);
+        }
+        
+        /* Loading Spinner */
+        .spinner {
+            border: 3px solid #334155;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .metrics-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .header {
+                flex-direction: column;
+                gap: 15px;
+            }
+            
+            .header-controls {
+                flex-wrap: wrap;
+            }
+        }
+    </style>
+    <script>
+        // Ensure showAuthModal is available immediately, even before DOMContentLoaded
+        function showAuthModal(event) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            console.log('[AUTH MODAL] showAuthModal called (early)');
+            const modal = document.getElementById('authModal');
+            if (modal) {
+                console.log('[AUTH MODAL] Modal element found, showing...');
+                modal.classList.add('active');
+                modal.style.display = 'flex';
+                modal.style.zIndex = '10000';
+                const firstInput = modal.querySelector('input');
+                if (firstInput) {
+                    setTimeout(() => firstInput.focus(), 100);
+                }
+            } else {
+                console.error('[AUTH MODAL] Modal element not found!');
+                // If modal not found, wait for DOM to load
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', function() {
+                        setTimeout(showAuthModal, 100);
+                    });
+                }
+            }
+        }
+        // Make it globally available
+        window.showAuthModal = showAuthModal;
+    </script>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>S001</h1>
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: nowrap;">
+                <!-- Theme Toggle Button -->
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 12px; color: var(--text-secondary); font-weight: 500;">
+                        <i class="fas fa-sun" style="font-size: 14px;"></i>
+                    </span>
+                    <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle Dark/Light Theme">
+                        <span class="theme-toggle-slider"></span>
+                        <i class="fas fa-sun theme-toggle-icon sun"></i>
+                        <i class="fas fa-moon theme-toggle-icon moon"></i>
+                    </button>
+                    <span style="font-size: 12px; color: var(--text-secondary); font-weight: 500;">
+                        <i class="fas fa-moon" style="font-size: 14px;"></i>
+                    </span>
+                </div>
+                <div class="status-indicator" id="statusIndicator">
+                    <span class="heart-icon" id="heartIcon">❤️</span>
+                    <span id="statusText">Not Connected</span>
+                </div>
+                <div id="userInfo" class="user-info" style="display: none;">
+                    <i class="fas fa-user icon"></i>
+                    <span class="user-name" id="userName">Loading...</span>
+                    <span style="margin: 0 8px;">|</span>
+                    <span class="user-id" id="userId">-</span>
+                </div>
+                <div id="authStatus" style="padding: 8px 16px; background: #dc3545; color: white; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; display: block;" onclick="showAuthModal()">
+                    🔒 Not Authenticated
+                </div>
+                <a href="/live/" id="liveTraderButton" style="padding: 8px 16px; background: #0ea5e9; color: white; text-decoration: none; border-radius: 6px; font-size: 14px; font-weight: 600; white-space: nowrap;">
+                    🤖 Live Trader
+                </a>
+                <a href="/admin/panel" style="padding: 8px 16px; background: var(--primary-color); color: white; text-decoration: none; border-radius: 6px; font-size: 14px; font-weight: 600; white-space: nowrap;">
+                    🔐 Admin Panel
+                </a>
+                <a href="/backtest/" style="padding: 8px 16px; background: #764ba2; color: white; text-decoration: none; border-radius: 6px; font-size: 14px; font-weight: 600; white-space: nowrap;">
+                    📊 Backtesting
+                </a>
+            </div>
+        </header>
+        
+        <!-- Auth Details Widget -->
+        <div class="auth-details-widget" id="authDetailsWidget">
+            <div class="auth-details-header" onclick="toggleAuthDetails()">
+                <i class="fas fa-key"></i>
+                <span>Authentication Details</span>
+                <i class="fas fa-chevron-down" id="authDetailsChevron"></i>
+            </div>
+            <div class="auth-details-content" id="authDetailsContent" style="display: none;">
+                <div class="auth-details-grid">
+                    <div class="auth-detail-item">
+                        <span class="auth-detail-label">API Key:</span>
+                        <span class="auth-detail-value" id="authApiKey">-</span>
+                    </div>
+                    <div class="auth-detail-item">
+                        <span class="auth-detail-label">API Secret:</span>
+                        <span class="auth-detail-value" id="authApiSecret">-</span>
+                    </div>
+                    <div class="auth-detail-item">
+                        <span class="auth-detail-label">Access Token:</span>
+                        <span class="auth-detail-value" id="authAccessToken">-</span>
+                    </div>
+                    <div class="auth-detail-item">
+                        <span class="auth-detail-label">Request Token:</span>
+                        <span class="auth-detail-value" id="authRequestToken">-</span>
+                    </div>
+                    <div class="auth-detail-item">
+                        <span class="auth-detail-label">Email:</span>
+                        <span class="auth-detail-value" id="authEmail">-</span>
+                    </div>
+                    <div class="auth-detail-item">
+                        <span class="auth-detail-label">Broker:</span>
+                        <span class="auth-detail-value" id="authBroker">-</span>
+                    </div>
+                    <div class="auth-detail-item">
+                        <span class="auth-detail-label">User ID:</span>
+                        <span class="auth-detail-value" id="authUserId">-</span>
+                    </div>
+                    <div class="auth-detail-item">
+                        <span class="auth-detail-label">Account Name:</span>
+                        <span class="auth-detail-value" id="authAccountName">-</span>
+                    </div>
+                    <div class="auth-detail-item">
+                        <span class="auth-detail-label">Full Name:</span>
+                        <span class="auth-detail-value" id="authFullName">-</span>
+                    </div>
+                </div>
+                <div style="margin-top: 20px; text-align: center;">
+                    <button id="disconnectButton" onclick="disconnectZerodha()" style="padding: 12px 24px; background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; display: none; transition: all 0.3s ease;">
+                        <i class="fas fa-plug" style="margin-right: 8px;"></i> Disconnect from Zerodha Account
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Authentication Modal -->
+        <div id="authModal" class="auth-modal">
+            <div class="auth-modal-content">
+                <h2 class="auth-modal-title">🔐 Zerodha Authentication</h2>
+                
+                <!-- Tabs for authentication methods -->
+                <div class="auth-tabs">
+                    <button id="tabAccessToken" onclick="switchAuthTab('accessToken')" class="auth-tab auth-tab-active">
+                        Access Token (Direct)
+                    </button>
+                    <button id="tabRequestToken" onclick="switchAuthTab('requestToken')" class="auth-tab">
+                        Request Token (OAuth)
+                    </button>
+                </div>
+                
+                <!-- Access Token Form -->
+                <div id="accessTokenForm" class="auth-form" style="display: block;">
+                    <p class="auth-form-description">Enter your API credentials and access token to connect.</p>
+                    <form id="authFormAccessToken" onsubmit="authenticateWithAccessToken(event)">
+                        <div class="auth-form-group">
+                            <label class="auth-form-label">API Key</label>
+                            <input type="text" id="accessTokenApiKey" class="auth-form-input" placeholder="Enter your API key" required>
+                        </div>
+                        <div class="auth-form-group">
+                            <label class="auth-form-label">API Secret</label>
+                            <input type="password" id="accessTokenApiSecret" class="auth-form-input" placeholder="Enter your API secret" required>
+                        </div>
+                        <div class="auth-form-group">
+                            <label class="auth-form-label">Access Token</label>
+                            <input type="text" id="accessToken" class="auth-form-input" placeholder="Enter your access token" required>
+                            <small class="auth-form-help">
+                                Use this if you already have a saved access token from a previous session.
+                            </small>
+                        </div>
+                        <div id="authError" class="auth-error" style="display: none;"></div>
+                        <div class="auth-form-actions">
+                            <button type="submit" class="auth-btn auth-btn-primary">Connect</button>
+                            <button type="button" onclick="hideAuthModal()" class="auth-btn auth-btn-secondary">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+                
+                <!-- Request Token Form -->
+                <div id="requestTokenForm" class="auth-form" style="display: none;">
+                    <p class="auth-form-description">Enter your API credentials and request token to generate an access token.</p>
+                    <form id="authFormRequestToken" onsubmit="authenticateWithRequestToken(event)">
+                        <div class="auth-form-group">
+                            <label class="auth-form-label">API Key</label>
+                            <input type="text" id="apiKey" class="auth-form-input" placeholder="Enter your API key" required>
+                        </div>
+                        <div class="auth-form-group">
+                            <label class="auth-form-label">API Secret</label>
+                            <input type="password" id="apiSecret" class="auth-form-input" placeholder="Enter your API secret" required>
+                        </div>
+                        <div class="auth-form-group">
+                            <label class="auth-form-label">Request Token</label>
+                            <input type="text" id="requestToken" class="auth-form-input" placeholder="Enter request token" required>
+                            <small class="auth-form-help">
+                                Get your request token from: 
+                                <a href="https://kite.trade/connect/login" target="_blank" id="kiteConnectLink" class="auth-form-link">Zerodha Kite Connect</a>
+                            </small>
+                        </div>
+                        <div id="authErrorRequest" class="auth-error" style="display: none;"></div>
+                        <div id="accessTokenDisplay" class="auth-access-token-display" style="display: none;">
+                            <label class="auth-form-label auth-form-label-success">Generated Access Token</label>
+                            <input type="text" id="generatedAccessToken" class="auth-form-input auth-form-input-readonly" readonly>
+                            <small class="auth-form-help auth-form-help-success">
+                                ✅ Access token generated successfully! This will be saved for future use.
+                            </small>
+                        </div>
+                        <div class="auth-form-actions">
+                            <button type="submit" id="authSubmitBtn" class="auth-btn auth-btn-primary">Generate & Connect</button>
+                            <button type="button" onclick="hideAuthModal()" class="auth-btn auth-btn-secondary">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Daily Summary Cards -->
+        <section class="summary-section">
+            <div class="card loss-card">
+                <div class="card-header">
+                    <h3>Daily Loss Used</h3>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span class="card-icon">⚠️</span>
+                        <button class="help-icon" onclick="showHelp('daily-loss')" title="Help">❓</button>
+                    </div>
+                </div>
+                <div class="card-value" id="dailyLossUsed">₹0.00</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="lossProgress"></div>
+                </div>
+                <div class="progress-label">
+                    <span id="lossUsed">₹0</span> / <span id="lossLimit">₹5,000</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Cumulative P&L Widget -->
+        <section class="cumulative-pnl-section">
+            <div class="panel">
+                <div class="panel-header">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <h2>Cumulative Profit & Loss</h2>
+                        <button class="help-icon-panel" onclick="showHelp('cumulative-pnl')" title="Help">❓</button>
+                    </div>
+                </div>
+                <div class="cumulative-pnl-container">
+                    <div id="cumulativePnlError" style="display: none; color: var(--danger-color); padding: 10px; background: #fee; border-radius: 6px; margin-bottom: 10px;"></div>
+                    <div class="pnl-metrics-list">
+                        <div class="pnl-metric-item" id="metric-all-time">
+                            <div class="metric-label">Cumulative Profit</div>
+                            <div class="metric-value" id="value-all-time">₹0.00</div>
+                            <div class="metric-percentage" id="percentage-all-time"></div>
+                        </div>
+                        <div class="pnl-metric-item" id="metric-year">
+                            <div class="metric-label" id="label-year">Year (2025)</div>
+                            <div class="metric-value" id="value-year">₹0.00</div>
+                            <div class="metric-percentage" id="percentage-year">(100.00%)</div>
+                        </div>
+                        <div class="pnl-metric-item" id="metric-month">
+                            <div class="metric-label" id="label-month">Month (Dec)</div>
+                            <div class="metric-value" id="value-month">₹0.00</div>
+                            <div class="metric-percentage" id="percentage-month"></div>
+                        </div>
+                        <div class="pnl-metric-item" id="metric-week">
+                            <div class="metric-label">Week</div>
+                            <div class="metric-value" id="value-week">₹0.00</div>
+                            <div class="metric-percentage" id="percentage-week"></div>
+                        </div>
+                        <div class="pnl-metric-item" id="metric-day">
+                            <div class="metric-label">Day</div>
+                            <div class="metric-value" id="value-day">₹0.00</div>
+                            <div class="metric-percentage" id="percentage-day"></div>
+                        </div>
+                    </div>
+                    <div class="radial-chart-container">
+                        <canvas id="cumulativePnlChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- Main Content -->
+        <section class="main-content">
+            <!-- Trade History -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <h2>Trade History (All Trades)</h2>
+                        <button class="help-icon-panel" onclick="showHelp('trade-history')" title="Help">❓</button>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <button id="syncOrdersBtn" onclick="syncOrdersFromZerodha()" 
+                                style="padding: 6px 12px; background: #10b981; color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">
+                            🔄 Sync Orders from Zerodha
+                        </button>
+                        <label style="display: flex; align-items: center; gap: 5px; font-size: 12px;">
+                            <input type="checkbox" id="showAllTrades" onchange="toggleTradeFilter()">
+                            Show All Trades
+                        </label>
+                        <input type="date" id="tradeDateFilter" class="date-filter">
+                    </div>
+                </div>
+                <!-- Trade Summary -->
+                <div id="tradeSummary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Total Trades</div>
+                        <div id="totalTrades" style="font-size: 18px; font-weight: 600; color: #10b981;">0</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Total Profit</div>
+                        <div id="totalProfit" style="font-size: 18px; font-weight: 600; color: #10b981;">₹0.00</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Total Loss</div>
+                        <div id="totalLoss" style="font-size: 18px; font-weight: 600; color: #ef4444;">₹0.00</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Net P&L</div>
+                        <div id="netPnl" style="font-size: 18px; font-weight: 600;">₹0.00</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Win Rate</div>
+                        <div id="winRate" style="font-size: 18px; font-weight: 600;">0%</div>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table class="data-table" id="tradesTable">
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Entry Time (IST)</th>
+                                <th>Exit Time (IST)</th>
+                                <th>Entry Price</th>
+                                <th>Exit Price</th>
+                                <th>Quantity</th>
+                                <th>P&L</th>
+                                <th>
+                                    Type
+                                    <span style="margin-left: 5px; cursor: help; font-size: 11px; color: #64748b;" 
+                                          title="BUY: Buy options (SL = entry_premium - stop_loss points)&#10;SELL: Sell options (SL = entry_premium + stop_loss% of premium)">❓</span>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody id="tradesBody">
+                            <tr>
+                                <td colspan="8" class="empty-state">No trades today</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- P&L Calendar Heatmap (Kite-style) -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <h2>P&L</h2>
+                        <button class="help-icon-panel" onclick="showHelp('pnl-chart')" title="Help">❓</button>
+                    </div>
+                </div>
+                <div class="pnl-heatmap-container">
+                    <!-- Filter Controls -->
+                    <div class="pnl-filters">
+                        <div class="filter-group">
+                            <label for="pnlSegment">SEGMENT:</label>
+                            <select id="pnlSegment" class="filter-select">
+                                <option value="all">All Segments</option>
+                                <option value="NIFTY">NIFTY</option>
+                                <option value="BANKNIFTY">BANKNIFTY</option>
+                                <option value="SENSEX">SENSEX</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="pnlType">P&L:</label>
+                            <select id="pnlType" class="filter-select">
+                                <option value="combined">Combined</option>
+                                <option value="paper">Paper</option>
+                                <option value="live">Live</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="pnlSymbol">SYMBOL:</label>
+                            <input type="text" id="pnlSymbol" class="filter-input" placeholder="eg: INFY">
+                        </div>
+                        <div class="filter-group">
+                            <label for="pnlDateRange">DATE RANGE:</label>
+                            <button type="button" id="pnlDateRangeBtn" class="filter-input" style="text-align: left; cursor: pointer; background: var(--card-bg);">
+                                <i class="fas fa-calendar-alt" style="margin-right: 8px;"></i>
+                                <span id="pnlDateRangeDisplay">Select Date Range</span>
+                            </button>
+                            <input type="hidden" id="pnlDateRange" value="">
+                        </div>
+                        <button id="applyPnlFilters" class="filter-apply-btn">
+                            <i class="fas fa-arrow-right"></i>
+                        </button>
+                    </div>
+                    
+                    <!-- Date Range Display -->
+                    <div class="pnl-date-range-display">
+                        <i class="fas fa-clock"></i>
+                        <span id="pnlDateRangeText">Loading...</span>
+                    </div>
+                    
+                    <!-- Calendar Heatmap -->
+                    <div class="pnl-calendar-container">
+                        <div id="pnlCalendarHeatmap" class="pnl-calendar-heatmap">
+                            <!-- Calendar will be generated here -->
+                        </div>
+                    </div>
+                    
+                    <!-- Realised P&L Summary -->
+                    <div class="pnl-summary-section">
+                        <div class="pnl-summary-header">
+                            <h3>Realised P&L Summary</h3>
+                        </div>
+                        <div class="pnl-summary-grid">
+                            <div class="pnl-summary-item">
+                                <div class="pnl-summary-label">REALISED P&L</div>
+                                <div class="pnl-summary-value" id="realisedPnlValue">₹0.00</div>
+                            </div>
+                            <div class="pnl-summary-item">
+                                <div class="pnl-summary-label">PAPER P&L</div>
+                                <div class="pnl-summary-value" id="paperPnlValue">₹0.00</div>
+                            </div>
+                            <div class="pnl-summary-item">
+                                <div class="pnl-summary-label">LIVE P&L</div>
+                                <div class="pnl-summary-value" id="livePnlValue">₹0.00</div>
+                            </div>
+                            <div class="pnl-summary-item">
+                                <div class="pnl-summary-label">TOTAL TRADES</div>
+                                <div class="pnl-summary-value" id="totalTradesCount">0</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Legend -->
+                    <div class="pnl-legend">
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: #ebedf0;"></span>
+                            <span>No data</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: #c6e48b;"></span>
+                            <span>Small profit</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: #7bc96f;"></span>
+                            <span>Medium profit</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: #239a3b;"></span>
+                            <span>Large profit</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: #ffc0cb;"></span>
+                            <span>Small loss</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: #ff6b6b;"></span>
+                            <span>Medium loss</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-color" style="background: #c92a2a;"></span>
+                            <span>Large loss</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+    
+    <!-- Date Range Picker Modal -->
+    <div id="dateRangePickerModal" class="date-picker-modal" style="display: none;">
+        <div class="date-picker-content">
+            <div class="date-picker-header">
+                <h3>Select Date Range</h3>
+                <button type="button" class="date-picker-close" onclick="closeDateRangePicker()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="date-picker-quick-options">
+                <button type="button" class="quick-option-btn" onclick="setQuickDateRange('last7')">Last 7 days</button>
+                <span class="quick-option-separator">|</span>
+                <button type="button" class="quick-option-btn" onclick="setQuickDateRange('last30')">Last 30 days</button>
+                <span class="quick-option-separator">|</span>
+                <button type="button" class="quick-option-btn" onclick="setQuickDateRange('prevFY')">Prev. FY</button>
+                <span class="quick-option-separator">|</span>
+                <button type="button" class="quick-option-btn" onclick="setQuickDateRange('currentFY')">Current FY</button>
+            </div>
+            <div class="date-picker-calendars">
+                <div class="date-picker-calendar">
+                    <div class="calendar-header">From</div>
+                    <div class="calendar-nav">
+                        <button type="button" class="calendar-nav-btn" onclick="changeMonth('from', -12)">
+                            <i class="fas fa-angle-double-left"></i>
+                        </button>
+                        <button type="button" class="calendar-nav-btn" onclick="changeMonth('from', -1)">
+                            <i class="fas fa-angle-left"></i>
+                        </button>
+                        <span class="calendar-month" id="fromMonthDisplay">Oct 2025</span>
+                        <button type="button" class="calendar-nav-btn" onclick="changeMonth('from', 1)">
+                            <i class="fas fa-angle-right"></i>
+                        </button>
+                        <button type="button" class="calendar-nav-btn" onclick="changeMonth('from', 12)">
+                            <i class="fas fa-angle-double-right"></i>
+                        </button>
+                    </div>
+                    <div class="calendar-grid" id="fromCalendar"></div>
+                </div>
+                <div class="date-picker-calendar">
+                    <div class="calendar-header">To</div>
+                    <div class="calendar-nav">
+                        <button type="button" class="calendar-nav-btn" onclick="changeMonth('to', -12)">
+                            <i class="fas fa-angle-double-left"></i>
+                        </button>
+                        <button type="button" class="calendar-nav-btn" onclick="changeMonth('to', -1)">
+                            <i class="fas fa-angle-left"></i>
+                        </button>
+                        <span class="calendar-month" id="toMonthDisplay">Dec 2025</span>
+                        <button type="button" class="calendar-nav-btn" onclick="changeMonth('to', 1)">
+                            <i class="fas fa-angle-right"></i>
+                        </button>
+                        <button type="button" class="calendar-nav-btn" onclick="changeMonth('to', 12)">
+                            <i class="fas fa-angle-double-right"></i>
+                        </button>
+                    </div>
+                    <div class="calendar-grid" id="toCalendar"></div>
+                </div>
+            </div>
+            <div class="date-picker-footer">
+                <button type="button" class="date-picker-btn date-picker-btn-secondary" onclick="closeDateRangePicker()">Cancel</button>
+                <button type="button" class="date-picker-btn date-picker-btn-primary" onclick="applyDateRange()">Apply</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Live Trader Modal -->
+    <div id="liveTraderModal" class="modal-overlay" onclick="if(event.target === this) hideLiveTraderModal()">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <h2><i class="fas fa-play-circle"></i> Live Trader</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                Start the Zero Touch Strangle strategy. The application is already connected.
+            </p>
+            
+            <form id="liveTraderForm" onsubmit="startLiveTraderStrategy(event)">
+                <div class="form-group">
+                    <label for="callQuantityInput">Call Quantity</label>
+                    <input type="number" id="callQuantityInput" placeholder="Enter call quantity" min="75" value="150" step="75" required>
+                    <small>Number of call options to trade (must be multiple of lot size - will be updated from config)</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="putQuantityInput">Put Quantity</label>
+                    <input type="number" id="putQuantityInput" placeholder="Enter put quantity" min="75" value="150" step="75" required>
+                    <small>Number of put options to trade (must be multiple of lot size - will be updated from config)</small>
+                </div>
+                
+                <div class="auth-error" id="liveTraderError"></div>
+                
+                <div class="modal-actions">
+                    <button type="submit" class="btn-primary">
+                        <i class="fas fa-play"></i> Start Live Trader
+                    </button>
+                    <button type="button" class="btn-secondary" onclick="hideLiveTraderModal()">
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Admin Panel Modal -->
+    <div id="adminModal" class="modal-overlay" onclick="if(event.target === this) hideAdminPanel()">
+        <div class="modal-content admin-modal-content" onclick="event.stopPropagation()" style="max-width: 1200px; max-height: 90vh; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                <h2><i class="fas fa-user-shield"></i> Admin Panel - Configuration Parameters</h2>
+                <button class="btn-secondary" onclick="hideAdminPanel()" style="padding: 8px 16px;">
+                    <i class="fas fa-times"></i> Close
+                </button>
+            </div>
+            
+            <div id="adminError" class="auth-error" style="display: none;"></div>
+            
+            <!-- Trading Parameters Section -->
+            <div class="admin-section">
+                <h3 class="admin-section-title"><i class="fas fa-chart-line"></i> Trading Parameters</h3>
+                <div class="admin-params-grid">
+                    <div class="admin-param-group">
+                        <label for="targetDeltaLow">Target Delta Low</label>
+                        <input type="number" id="targetDeltaLow" step="0.01" min="0" max="1" 
+                               onchange="updateAdminParameter('TARGET_DELTA_LOW', parseFloat(this.value), this)">
+                        <small>Lower bound for target delta (0-1)</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="targetDeltaHigh">Target Delta High</label>
+                        <input type="number" id="targetDeltaHigh" step="0.01" min="0" max="1"
+                               onchange="updateAdminParameter('TARGET_DELTA_HIGH', parseFloat(this.value), this)">
+                        <small>Upper bound for target delta (0-1)</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="maxStopLossTrigger">Max Stop Loss Trigger</label>
+                        <input type="number" id="maxStopLossTrigger" min="1" max="10"
+                               onchange="updateAdminParameter('MAX_STOP_LOSS_TRIGGER', parseInt(this.value), this)">
+                        <small>Maximum number of stop-loss triggers allowed</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="maxPriceDifferencePercentage">Max Price Difference %</label>
+                        <input type="number" id="maxPriceDifferencePercentage" step="0.1" min="0" max="10"
+                               onchange="updateAdminParameter('MAX_PRICE_DIFFERENCE_PERCENTAGE', parseFloat(this.value), this)">
+                        <small>Maximum allowed price difference between call and put (%)</small>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- VIX Configuration Section -->
+            <div class="admin-section">
+                <h3 class="admin-section-title"><i class="fas fa-chart-area"></i> VIX Configuration</h3>
+                <div class="admin-params-grid">
+                    <div class="admin-param-group">
+                        <label for="vixDeltaThreshold">VIX Delta Threshold</label>
+                        <input type="number" id="vixDeltaThreshold" step="0.1" min="0" max="50"
+                               onchange="updateAdminParameter('VIX_DELTA_THRESHOLD', parseFloat(this.value), this)">
+                        <small>VIX threshold below which to use wider delta range</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="vixDeltaLow">VIX Delta Low</label>
+                        <input type="number" id="vixDeltaLow" step="0.01" min="0" max="1"
+                               onchange="updateAdminParameter('VIX_DELTA_LOW', parseFloat(this.value), this)">
+                        <small>Lower delta when VIX < threshold</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="vixDeltaHigh">VIX Delta High</label>
+                        <input type="number" id="vixDeltaHigh" step="0.01" min="0" max="1"
+                               onchange="updateAdminParameter('VIX_DELTA_HIGH', parseFloat(this.value), this)">
+                        <small>Higher delta when VIX < threshold</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="vixHedgePointsCandr">VIX Hedge Points (Calendar)</label>
+                        <input type="number" id="vixHedgePointsCandr" step="1" min="0" max="100"
+                               onchange="updateAdminParameter('VIX_HEDGE_POINTS_CANDR', parseInt(this.value), this)">
+                        <small>Calendar-specific hedge trigger points</small>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Delta Configuration Section -->
+            <div class="admin-section">
+                <h3 class="admin-section-title"><i class="fas fa-sliders-h"></i> Delta Configuration</h3>
+                <div class="admin-params-grid">
+                    <div class="admin-param-group">
+                        <label for="deltaMin">Delta Min</label>
+                        <input type="number" id="deltaMin" step="0.01" min="0" max="1"
+                               onchange="updateAdminParameter('DELTA_MIN', parseFloat(this.value), this)">
+                        <small>Minimum allowed delta for initial trade selection</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="deltaMax">Delta Max</label>
+                        <input type="number" id="deltaMax" step="0.01" min="0" max="1"
+                               onchange="updateAdminParameter('DELTA_MAX', parseFloat(this.value), this)">
+                        <small>Maximum allowed delta for initial trade selection</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="deltaMonitoringThreshold">Delta Monitoring Threshold</label>
+                        <input type="number" id="deltaMonitoringThreshold" step="0.01" min="0" max="1"
+                               onchange="updateAdminParameter('DELTA_MONITORING_THRESHOLD', parseFloat(this.value), this)">
+                        <small>Threshold for monitoring - if delta goes below this, modify SL</small>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Hedge Configuration Section -->
+            <div class="admin-section">
+                <h3 class="admin-section-title"><i class="fas fa-shield-alt"></i> Hedge Configuration</h3>
+                <div class="admin-params-grid">
+                    <div class="admin-param-group">
+                        <label for="hedgeTriggerPoints">Hedge Trigger Points</label>
+                        <input type="number" id="hedgeTriggerPoints" step="1" min="0" max="100"
+                               onchange="updateAdminParameter('HEDGE_TRIGGER_POINTS', parseInt(this.value), this)">
+                        <small>Points at which to trigger hedge (generic)</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="hedgeTriggerPointsStrangle">Hedge Trigger Points (Strangle)</label>
+                        <input type="number" id="hedgeTriggerPointsStrangle" step="1" min="0" max="100"
+                               onchange="updateAdminParameter('HEDGE_TRIGGER_POINTS_STRANGLE', parseInt(this.value), this)">
+                        <small>Strangle-specific hedge trigger points</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="hedgePointsDifference">Hedge Points Difference</label>
+                        <input type="number" id="hedgePointsDifference" step="1" min="0" max="500"
+                               onchange="updateAdminParameter('HEDGE_POINTS_DIFFERENCE', parseInt(this.value), this)">
+                        <small>Points difference for hedge strikes</small>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- VWAP Configuration Section -->
+            <div class="admin-section">
+                <h3 class="admin-section-title"><i class="fas fa-chart-bar"></i> VWAP Configuration</h3>
+                <div class="admin-params-grid">
+                    <div class="admin-param-group">
+                        <label for="vwapMinutes">VWAP Minutes</label>
+                        <input type="number" id="vwapMinutes" step="1" min="1" max="60"
+                               onchange="updateAdminParameter('VWAP_MINUTES', parseInt(this.value), this)">
+                        <small>Number of minutes to calculate VWAP</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="vwapMaxPriceDiffPercent">VWAP Max Price Diff %</label>
+                        <input type="number" id="vwapMaxPriceDiffPercent" step="0.1" min="0" max="50"
+                               onchange="updateAdminParameter('VWAP_MAX_PRICE_DIFF_PERCENT', parseFloat(this.value), this)">
+                        <small>Maximum allowed difference between VWAP and price (%)</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="vwapMinCandles">VWAP Min Candles</label>
+                        <input type="number" id="vwapMinCandles" step="1" min="1" max="500"
+                               onchange="updateAdminParameter('VWAP_MIN_CANDLES', parseInt(this.value), this)">
+                        <small>Minimum candles required for VWAP calculation</small>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Profit Booking Section -->
+            <div class="admin-section">
+                <h3 class="admin-section-title"><i class="fas fa-money-bill-wave"></i> Profit Booking</h3>
+                <div class="admin-params-grid">
+                    <div class="admin-param-group">
+                        <label for="initialProfitBooking">Initial Profit Booking</label>
+                        <input type="number" id="initialProfitBooking" step="1" min="0" max="200"
+                               onchange="updateAdminParameter('INITIAL_PROFIT_BOOKING', parseInt(this.value), this)">
+                        <small>Points at which to book initial profit</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="secondProfitBooking">Second Profit Booking</label>
+                        <input type="number" id="secondProfitBooking" step="1" min="0" max="200"
+                               onchange="updateAdminParameter('SECOND_PROFIT_BOOKING', parseInt(this.value), this)">
+                        <small>Points at which to book second profit</small>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Stop Loss Configuration Section -->
+            <div class="admin-section">
+                <h3 class="admin-section-title"><i class="fas fa-exclamation-triangle"></i> Stop Loss Configuration (by Day)</h3>
+                <div class="admin-params-grid">
+                    <div class="admin-param-group">
+                        <label for="slMonday">Monday Stop Loss %</label>
+                        <input type="number" id="slMonday" step="0.1" min="0" max="100"
+                               onchange="updateStopLossConfig()">
+                        <small>Stop loss percentage for Monday</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="slTuesday">Tuesday Stop Loss %</label>
+                        <input type="number" id="slTuesday" step="0.1" min="0" max="100"
+                               onchange="updateStopLossConfig()">
+                        <small>Stop loss percentage for Tuesday (Weekly expiry)</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="slWednesday">Wednesday Stop Loss %</label>
+                        <input type="number" id="slWednesday" step="0.1" min="0" max="100"
+                               onchange="updateStopLossConfig()">
+                        <small>Stop loss percentage for Wednesday</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="slThursday">Thursday Stop Loss %</label>
+                        <input type="number" id="slThursday" step="0.1" min="0" max="100"
+                               onchange="updateStopLossConfig()">
+                        <small>Stop loss percentage for Thursday</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="slFriday">Friday Stop Loss %</label>
+                        <input type="number" id="slFriday" step="0.1" min="0" max="100"
+                               onchange="updateStopLossConfig()">
+                        <small>Stop loss percentage for Friday</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="slDefault">Default Stop Loss %</label>
+                        <input type="number" id="slDefault" step="0.1" min="0" max="100"
+                               onchange="updateStopLossConfig()">
+                        <small>Default stop loss percentage</small>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 24px; padding-top: 24px; border-top: 2px solid var(--border-color);">
+                <p style="color: var(--text-secondary); font-size: 14px; text-align: center;">
+                    <i class="fas fa-info-circle"></i> Changes are automatically saved to config.py and will be picked up by the running program via config monitor.
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let pnlChart = null;
+        // updateInterval is declared in dashboard.js, don't redeclare here
+        let isLiveTraderActive = false;
+        let lotSize = 75; // Default lot size, will be fetched from API
+
+        // Fetch lot size from config
+        async function fetchLotSize() {
+            try {
+                const response = await fetch('/api/config/lot-size');
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        lotSize = data.lot_size;
+                        // Update input fields with lot size
+                        const callQtyInput = document.getElementById('callQuantityInput');
+                        const putQtyInput = document.getElementById('putQuantityInput');
+                        if (callQtyInput) {
+                            callQtyInput.min = lotSize;
+                            callQtyInput.step = lotSize;
+                            if (!callQtyInput.value || parseInt(callQtyInput.value) < lotSize) {
+                                callQtyInput.value = lotSize * 2; // Default to 2 lots
+                            }
+                            // Update help text
+                            const callQtySmall = callQtyInput.parentElement.querySelector('small');
+                            if (callQtySmall) {
+                                callQtySmall.textContent = `Number of call options to trade (must be multiple of ${lotSize}, e.g., ${lotSize}, ${lotSize * 2}, ${lotSize * 3}, ${lotSize * 4})`;
+                            }
+                        }
+                        if (putQtyInput) {
+                            putQtyInput.min = lotSize;
+                            putQtyInput.step = lotSize;
+                            if (!putQtyInput.value || parseInt(putQtyInput.value) < lotSize) {
+                                putQtyInput.value = lotSize * 2; // Default to 2 lots
+                            }
+                            // Update help text
+                            const putQtySmall = putQtyInput.parentElement.querySelector('small');
+                            if (putQtySmall) {
+                                putQtySmall.textContent = `Number of put options to trade (must be multiple of ${lotSize}, e.g., ${lotSize}, ${lotSize * 2}, ${lotSize * 3}, ${lotSize * 4})`;
+                            }
+                        }
+                        console.log(`[LOT SIZE] Loaded from config: ${lotSize}`);
+                    }
+                }
+            } catch (error) {
+                console.error('[LOT SIZE] Error fetching lot size:', error);
+                // Use default 75 if fetch fails
+            }
+        }
+        
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            fetchLotSize(); // Fetch lot size first
+            initializeTheme();
+            initializeDashboard();
+            setupDateFilter();
+            initializeChart();
+            startAutoRefresh();
+            
+            // Check auth status first, then connectivity (auth status takes priority)
+            checkAuthStatus().then(() => {
+                // After auth status is checked, update connectivity to match
+                checkConnectivity();
+            });
+            
+            // Check auth status every 5 seconds to keep button and label in sync
+            setInterval(checkAuthStatus, 5000);
+            // Check connectivity less frequently and only if auth is OK
+            setInterval(() => {
+                const authStatusEl = document.getElementById('authStatus');
+                const isAuth = authStatusEl && authStatusEl.classList.contains('authenticated');
+                if (isAuth) {
+                    checkConnectivity();
+                }
+            }, 10000);
+            
+            // Auto-show auth modal if not authenticated after 2 seconds
+            setTimeout(async () => {
+                try {
+                    const authResponse = await fetch('/api/auth/status');
+                    const authData = await authResponse.json();
+                    if (!authData.authenticated) {
+                        // Don't auto-show, let user click when ready
+                        // showAuthModal();
+                    }
+                } catch (error) {
+                    console.error('Error checking initial auth:', error);
+                }
+            }, 2000);
+        });
+        
+        // Theme Management
+        function initializeTheme() {
+            const savedTheme = getTheme();
+            applyTheme(savedTheme);
+        }
+        
+        // Theme Toggle Functions
+        function getTheme() {
+            return localStorage.getItem('theme') || 'dark';
+        }
+
+        function setTheme(theme) {
+            localStorage.setItem('theme', theme);
+            document.documentElement.setAttribute('data-theme', theme);
+            updateThemeToggle(theme);
+        }
+
+        function toggleTheme() {
+            const currentTheme = getTheme();
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            setTheme(newTheme);
+        }
+
+        function updateThemeToggle(theme) {
+            const themeToggle = document.getElementById('themeToggle');
+            if (themeToggle) {
+                // The toggle slider position is handled by CSS based on data-theme
+                // No need to manually update classes
+            }
+        }
+
+        function applyTheme(theme) {
+            setTheme(theme);
+            
+            // Update chart colors if chart exists
+            if (typeof cumulativePnlChart !== 'undefined' && cumulativePnlChart) {
+                updateChartTheme(theme);
+            }
+        }
+        
+        function updateChartTheme(theme) {
+            if (!pnlChart) return;
+            
+            const isLight = theme === 'light';
+            const textColor = isLight ? '#1e293b' : '#e2e8f0';
+            const gridColor = isLight ? 'rgba(0,0,0,0.1)' : '#334155';
+            const secondaryColor = isLight ? '#475569' : '#94a3b8';
+            
+            pnlChart.options.plugins.legend.labels.color = textColor;
+            pnlChart.options.scales.x.ticks.color = secondaryColor;
+            pnlChart.options.scales.y.ticks.color = secondaryColor;
+            pnlChart.options.scales.x.grid.color = gridColor;
+            pnlChart.options.scales.y.grid.color = gridColor;
+            pnlChart.update('none'); // Update without animation for smoother transition
+        }
+        
+        function initializeDashboard() {
+            loadMetrics();
+            loadAllPositions();
+        }
+        
+        function setupDateFilter() {
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('tradeDateFilter').value = today;
+        }
+        
+        function initializeChart() {
+            // Check for P&L chart canvas
+            const pnlChartElement = document.getElementById('pnlChart');
+            if (pnlChartElement) {
+                const ctx = pnlChartElement.getContext('2d');
+                const currentTheme = getTheme();
+                const isLightTheme = currentTheme === 'light';
+            const textColor = isLightTheme ? '#1e293b' : '#e2e8f0';
+            const gridColor = isLightTheme ? 'rgba(0,0,0,0.1)' : '#334155';
+            const secondaryColor = isLightTheme ? '#475569' : '#94a3b8';
+            
+            pnlChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'Current P&L',
+                            data: [],
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Protected Profit',
+                            data: [],
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Total P&L',
+                            data: [],
+                            borderColor: '#f59e0b',
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                color: textColor,
+                                usePointStyle: true
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { 
+                                color: secondaryColor
+                            },
+                            grid: { 
+                                color: gridColor
+                            }
+                        },
+                        y: {
+                            ticks: { 
+                                color: secondaryColor,
+                                callback: function(value) {
+                                    return '₹' + value.toFixed(2);
+                                }
+                            },
+                            grid: { 
+                                color: gridColor
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        async function loadMetrics() {
+            try {
+                const response = await fetch('/api/dashboard/metrics');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    // Update only Total Day P&L
+                    const totalDayPnl = data.totalDayPnl || 0;
+                    const totalDayPnlEl = document.getElementById('totalDayPnl');
+                    if (totalDayPnlEl) {
+                        totalDayPnlEl.textContent = formatCurrency(totalDayPnl);
+                        // Update color based on value
+                        totalDayPnlEl.className = 'metric-value ' + (totalDayPnl >= 0 ? 'positive' : 'negative');
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading metrics:', error);
+            }
+        }
+        
+        async function loadAllPositions() {
+            try {
+                const response = await fetch('/api/dashboard/positions');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    updateAllPositions(data.positions || [], data.totalPnl || 0);
+                }
+            } catch (error) {
+                console.error('Error loading positions:', error);
+            }
+        }
+        
+        function updateAllPositions(positions, totalPnl) {
+            const tbody = document.getElementById('allPositionsBody');
+            const totalPnlFooter = document.getElementById('totalPnlFooter');
+            const totalPositionsCount = document.getElementById('totalPositionsCount');
+            
+            if (!tbody) {
+                // Positions table might not exist in new template structure
+                console.warn('Positions table body not found, skipping update');
+                return;
+            }
+            
+            if (totalPositionsCount) {
+                totalPositionsCount.textContent = positions.length;
+            }
+            
+            // Update total P&L footer
+            if (totalPnlFooter) {
+                totalPnlFooter.textContent = formatCurrency(totalPnl);
+                totalPnlFooter.style.color = totalPnl >= 0 ? '#10b981' : '#ef4444';
+            }
+            
+            if (positions.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No positions available</td></tr>';
+                return;
+            }
+            
+            // Sort positions: active first (quantity != 0), then by P&L
+            positions.sort((a, b) => {
+                if (a.isActive !== b.isActive) {
+                    return b.isActive - a.isActive; // Active first
+                }
+                return b.pnl - a.pnl; // Higher P&L first
+            });
+            
+            tbody.innerHTML = positions.map(pos => {
+                const pnlColor = pos.pnl >= 0 ? '#10b981' : '#ef4444';
+                const pnlSign = pos.pnl >= 0 ? '+' : '';
+                const isActive = pos.isActive;
+                const rowStyle = isActive ? '' : 'opacity: 0.7;';
+                
+                return `
+                    <tr style="${rowStyle}">
+                        <td>${pos.product}</td>
+                        <td>${pos.symbol}</td>
+                        <td>${pos.quantity}</td>
+                        <td>${formatCurrency(pos.entryPrice)}</td>
+                        <td>${formatCurrency(pos.currentPrice)}</td>
+                        <td style="color: ${pnlColor}; font-weight: 600;">
+                            ${pnlSign}${formatCurrency(pos.pnl)}
+                        </td>
+                        <td>${pos.dayChangePercentage ? pos.dayChangePercentage.toFixed(2) : '0.00'}%</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+        
+        async function updateChart() {
+            try {
+                const response = await fetch('/api/dashboard/pnl-chart');
+                const data = await response.json();
+                
+                if (data.status === 'success' && pnlChart) {
+                    pnlChart.data.labels = data.labels || [];
+                    pnlChart.data.datasets[0].data = data.currentPnl || [];
+                    pnlChart.data.datasets[1].data = data.protectedProfit || [];
+                    pnlChart.data.datasets[2].data = data.totalPnl || [];
+                    pnlChart.update();
+                }
+            } catch (error) {
+                console.error('Error updating chart:', error);
+            }
+        }
+        
+        function toggleLiveTrader() {
+            if (isLiveTraderActive) {
+                stopStrategy();
+            } else {
+                showLiveTraderModal();
+            }
+        }
+        
+        function showLiveTraderModal() {
+            // Check authentication first
+            checkAuthStatus().then(() => {
+                const authStatusEl = document.getElementById('authStatus');
+                if (authStatusEl && authStatusEl.classList.contains('not-authenticated')) {
+                    showNotification('Please authenticate first before starting Live Trader', 'error');
+                    showAuthModal();
+                    return;
+                }
+                
+                // Show Live Trader modal
+                const modal = document.getElementById('liveTraderModal');
+                if (modal) {
+                    modal.classList.add('active');
+                }
+            });
+        }
+        
+        function hideLiveTraderModal() {
+            const modal = document.getElementById('liveTraderModal');
+            const errorEl = document.getElementById('liveTraderError');
+            if (modal) modal.classList.remove('active');
+            if (errorEl) {
+                errorEl.classList.remove('show');
+                errorEl.textContent = '';
+            }
+        }
+        
+        async function startLiveTraderStrategy(event) {
+            event.preventDefault();
+            
+            const callQuantity = parseInt(document.getElementById('callQuantityInput').value.trim());
+            const putQuantity = parseInt(document.getElementById('putQuantityInput').value.trim());
+            const errorEl = document.getElementById('liveTraderError');
+            const submitBtn = event.target.querySelector('button[type="submit"]');
+            
+            if (!callQuantity || callQuantity <= 0) {
+                if (errorEl) {
+                    errorEl.textContent = 'Please enter a valid Call Quantity';
+                    errorEl.classList.add('show');
+                }
+                return;
+            }
+            
+            if (!putQuantity || putQuantity <= 0) {
+                if (errorEl) {
+                    errorEl.textContent = 'Please enter a valid Put Quantity';
+                    errorEl.classList.add('show');
+                }
+                return;
+            }
+
+            // Validate quantities are multiples of lot size (from config)
+            if (callQuantity % lotSize !== 0) {
+                if (errorEl) {
+                    errorEl.textContent = `Call Quantity must be a multiple of ${lotSize}. You entered ${callQuantity}. Nearest valid: ${Math.floor(callQuantity / lotSize) * lotSize}`;
+                    errorEl.classList.add('show');
+                }
+                return;
+            }
+
+            if (putQuantity % lotSize !== 0) {
+                if (errorEl) {
+                    errorEl.textContent = `Put Quantity must be a multiple of ${lotSize}. You entered ${putQuantity}. Nearest valid: ${Math.floor(putQuantity / lotSize) * lotSize}`;
+                    errorEl.classList.add('show');
+                }
+                return;
+            }
+            
+            try {
+                if (errorEl) errorEl.classList.remove('show');
+                if (submitBtn) {
+                    submitBtn.disabled = true;
+                    submitBtn.innerHTML = '<span class="loading-spinner"></span> Starting...';
+                }
+                
+                const response = await fetch('/api/live-trader/start', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        callQuantity: callQuantity,
+                        putQuantity: putQuantity
+                    })
+                });
+                
+                // Check if response is OK and has content
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Server error: ${response.status} - ${errorText}`);
+                }
+                
+                // Get response text first to check if it's valid JSON
+                const responseText = await response.text();
+                if (!responseText || responseText.trim() === '') {
+                    throw new Error('Empty response from server');
+                }
+                
+                let data;
+                try {
+                    data = JSON.parse(responseText);
+                } catch (jsonError) {
+                    console.error('Invalid JSON response:', responseText);
+                    throw new Error(`Invalid response from server: ${jsonError.message}`);
+                }
+                
+                if (data.success) {
+                    hideLiveTraderModal();
+                    isLiveTraderActive = true;
+                    document.getElementById('liveTraderBtn').innerHTML = '<i class="fas fa-stop"></i> Stop Trader';
+                    document.getElementById('liveTraderBtn').classList.add('danger');
+                    showNotification('Live Trader started successfully!', 'success');
+                    // Refresh status
+                    setTimeout(() => {
+                        checkAuthStatus();
+                        checkConnectivity();
+                        loadAllPositions();
+                    }, 1000);
+                } else {
+                    if (errorEl) {
+                        errorEl.textContent = data.error || 'Failed to start Live Trader';
+                        errorEl.classList.add('show');
+                    }
+                }
+            } catch (error) {
+                console.error('Start Live Trader error:', error);
+                if (errorEl) {
+                    errorEl.textContent = 'Error: ' + error.message;
+                    errorEl.classList.add('show');
+                }
+            } finally {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fas fa-play"></i> Start Live Trader';
+                }
+            }
+        }
+        
+        async function stopStrategy() {
+            try {
+                const response = await fetch('/api/strategy/stop', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    isLiveTraderActive = false;
+                    document.getElementById('liveTraderBtn').innerHTML = '<i class="fas fa-play"></i> Live Trader';
+                    document.getElementById('liveTraderBtn').classList.remove('danger');
+                    showNotification('Strategy stopped successfully!', 'success');
+                } else {
+                    showNotification('Error: ' + data.message, 'error');
+                }
+            } catch (error) {
+                showNotification('Error stopping strategy: ' + error.message, 'error');
+            }
+        }
+        
+        function clearCacheAndRefresh() {
+            loadAllPositions();
+            loadMetrics();
+        }
+        
+        function showAdminPanel() {
+            const modal = document.getElementById('adminModal');
+            if (modal) {
+                modal.classList.add('active');
+                loadAdminConfig();
+            }
+        }
+        
+        function hideAdminPanel() {
+            const modal = document.getElementById('adminModal');
+            if (modal) {
+                modal.classList.remove('active');
+            }
+        }
+        
+        async function loadAdminConfig() {
+            try {
+                const response = await fetch('/api/config/current');
+                const data = await response.json();
+                
+                if (data.status === 'success' && data.config) {
+                    populateAdminForm(data.config);
+                }
+            } catch (error) {
+                console.error('Error loading config:', error);
+            }
+        }
+        
+        function populateAdminForm(config) {
+            // Trading Parameters
+            if (config.TARGET_DELTA_LOW !== undefined) {
+                document.getElementById('targetDeltaLow').value = config.TARGET_DELTA_LOW;
+            }
+            if (config.TARGET_DELTA_HIGH !== undefined) {
+                document.getElementById('targetDeltaHigh').value = config.TARGET_DELTA_HIGH;
+            }
+            if (config.MAX_STOP_LOSS_TRIGGER !== undefined) {
+                document.getElementById('maxStopLossTrigger').value = config.MAX_STOP_LOSS_TRIGGER;
+            }
+            
+            // VIX Configuration
+            if (config.VIX_DELTA_THRESHOLD !== undefined) {
+                document.getElementById('vixDeltaThreshold').value = config.VIX_DELTA_THRESHOLD;
+            }
+            if (config.VIX_DELTA_LOW !== undefined) {
+                document.getElementById('vixDeltaLow').value = config.VIX_DELTA_LOW;
+            }
+            if (config.VIX_DELTA_HIGH !== undefined) {
+                document.getElementById('vixDeltaHigh').value = config.VIX_DELTA_HIGH;
+            }
+            if (config.VIX_HEDGE_POINTS_CANDR !== undefined) {
+                document.getElementById('vixHedgePointsCandr').value = config.VIX_HEDGE_POINTS_CANDR;
+            }
+            
+            // Delta Configuration
+            if (config.DELTA_MONITORING_THRESHOLD !== undefined) {
+                document.getElementById('deltaMonitoringThreshold').value = config.DELTA_MONITORING_THRESHOLD;
+            }
+            if (config.DELTA_MIN !== undefined) {
+                document.getElementById('deltaMin').value = config.DELTA_MIN;
+            }
+            if (config.DELTA_MAX !== undefined) {
+                document.getElementById('deltaMax').value = config.DELTA_MAX;
+            }
+            
+            // Hedge Configuration
+            if (config.HEDGE_TRIGGER_POINTS !== undefined) {
+                document.getElementById('hedgeTriggerPoints').value = config.HEDGE_TRIGGER_POINTS;
+            }
+            if (config.HEDGE_TRIGGER_POINTS_STRANGLE !== undefined) {
+                document.getElementById('hedgeTriggerPointsStrangle').value = config.HEDGE_TRIGGER_POINTS_STRANGLE;
+            }
+            if (config.HEDGE_POINTS_DIFFERENCE !== undefined) {
+                document.getElementById('hedgePointsDifference').value = config.HEDGE_POINTS_DIFFERENCE;
+            }
+            
+            // VWAP Configuration
+            if (config.VWAP_MINUTES !== undefined) {
+                document.getElementById('vwapMinutes').value = config.VWAP_MINUTES;
+            }
+            if (config.VWAP_MAX_PRICE_DIFF_PERCENT !== undefined) {
+                document.getElementById('vwapMaxPriceDiffPercent').value = config.VWAP_MAX_PRICE_DIFF_PERCENT;
+            }
+            if (config.VWAP_MIN_CANDLES !== undefined) {
+                document.getElementById('vwapMinCandles').value = config.VWAP_MIN_CANDLES;
+            }
+            
+            // Profit Booking
+            if (config.INITIAL_PROFIT_BOOKING !== undefined) {
+                document.getElementById('initialProfitBooking').value = config.INITIAL_PROFIT_BOOKING;
+            }
+            if (config.SECOND_PROFIT_BOOKING !== undefined) {
+                document.getElementById('secondProfitBooking').value = config.SECOND_PROFIT_BOOKING;
+            }
+            
+            // Price Difference
+            if (config.MAX_PRICE_DIFFERENCE_PERCENTAGE !== undefined) {
+                document.getElementById('maxPriceDifferencePercentage').value = config.MAX_PRICE_DIFFERENCE_PERCENTAGE;
+            }
+            
+            // Stop Loss Configuration
+            if (config.STOP_LOSS_CONFIG !== undefined) {
+                const slConfig = config.STOP_LOSS_CONFIG;
+                if (typeof slConfig === 'object') {
+                    document.getElementById('slTuesday').value = slConfig.Tuesday || slConfig.default || 30;
+                    document.getElementById('slWednesday').value = slConfig.Wednesday || slConfig.default || 30;
+                    document.getElementById('slThursday').value = slConfig.Thursday || slConfig.default || 30;
+                    document.getElementById('slFriday').value = slConfig.Friday || slConfig.default || 30;
+                    document.getElementById('slMonday').value = slConfig.Monday || slConfig.default || 30;
+                    document.getElementById('slDefault').value = slConfig.default || 30;
+                }
+            }
+        }
+        
+        async function updateAdminParameter(paramName, value, inputElement) {
+            if (value === '' || value === null || value === undefined) {
+                showNotification(`Please enter a value for ${paramName}`, 'error');
+                loadAdminConfig(); // Reload to revert
+                return;
+            }
+            
+            try {
+                // Show loading state
+                if (inputElement) {
+                    inputElement.disabled = true;
+                    inputElement.style.opacity = '0.6';
+                }
+                
+                const response = await fetch('/api/config/update', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        parameter: paramName,
+                        value: value
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    showNotification(`✓ Updated ${paramName} to ${value}`, 'success');
+                    // Small delay before reloading to show success
+                    setTimeout(() => {
+                        loadAdminConfig();
+                    }, 500);
+                } else {
+                    showNotification(`✗ Error: ${data.message}`, 'error');
+                    // Reload to revert on error
+                    loadAdminConfig();
+                }
+            } catch (error) {
+                showNotification(`✗ Error updating parameter: ${error.message}`, 'error');
+                loadAdminConfig();
+            } finally {
+                if (inputElement) {
+                    inputElement.disabled = false;
+                    inputElement.style.opacity = '1';
+                }
+            }
+        }
+        
+        function updateStopLossConfig() {
+            const slConfig = {
+                'Tuesday': parseFloat(document.getElementById('slTuesday').value) || 30,
+                'Wednesday': parseFloat(document.getElementById('slWednesday').value) || 30,
+                'Thursday': parseFloat(document.getElementById('slThursday').value) || 30,
+                'Friday': parseFloat(document.getElementById('slFriday').value) || 30,
+                'Monday': parseFloat(document.getElementById('slMonday').value) || 30,
+                'default': parseFloat(document.getElementById('slDefault').value) || 30
+            };
+            
+            // Update STOP_LOSS_CONFIG as a dictionary
+            updateAdminParameter('STOP_LOSS_CONFIG', slConfig);
+        }
+        
+        function closePosition(symbol) {
+            if (confirm(`Close position for ${symbol}?`)) {
+                // Implement close position logic
+                alert('Position close request sent');
+            }
+        }
+        
+        function startAutoRefresh() {
+            updateInterval = setInterval(() => {
+                loadMetrics();
+                loadAllPositions();
+                updateChart();
+            }, 5000); // Refresh every 5 seconds
+        }
+        
+        // Authentication Functions
+        async function checkAuthStatus() {
+            try {
+                const response = await fetch('/api/auth/status');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                
+                console.log('[AUTH STATUS] Response:', data);
+                
+                // Check if authenticated - handle both 'authenticated' and 'status' fields
+                const isAuthenticated = data.authenticated === true || (data.status === 'success' && data.authenticated === true);
+                
+                const authStatusEl = document.getElementById('authStatus');
+                const authStatusText = document.getElementById('authStatusText');
+                
+                if (authStatusEl) {
+                    if (isAuthenticated) {
+                        authStatusEl.className = 'status-badge authenticated';
+                        authStatusEl.innerHTML = '<i class="fas fa-check-circle"></i><span id="authStatusText">Authenticated</span>';
+                        authStatusEl.onclick = null;
+                        authStatusEl.removeAttribute('onclick'); // Remove inline onclick
+                        authStatusEl.style.cursor = 'default';
+                        authStatusEl.style.pointerEvents = 'none';
+                        
+                        // Update account name display if available
+                        if (data.account_name) {
+                            updateAccountNameDisplay(data.account_name);
+                        }
+                    } else {
+                        authStatusEl.className = 'status-badge not-authenticated';
+                        // CRITICAL: Preserve onclick before updating innerHTML
+                        authStatusEl.setAttribute('onclick', 'showAuthModal()');
+                        authStatusEl.innerHTML = '<i class="fas fa-lock"></i><span id="authStatusText">Not Authenticated</span>';
+                        // CRITICAL: Set onclick handler after innerHTML update (innerHTML removes event handlers)
+                        authStatusEl.onclick = function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            console.log('[AUTH BUTTON] Clicked, opening modal...');
+                            showAuthModal();
+                        };
+                        authStatusEl.style.cursor = 'pointer';
+                        authStatusEl.style.pointerEvents = 'auto';
+                        
+                        // Hide account name if not authenticated
+                        const accountNameContainer = document.querySelector('.account-name-display');
+                        if (accountNameContainer) {
+                            accountNameContainer.style.display = 'none';
+                        }
+                    }
+                    
+                    // Also update text element if it exists separately
+                    if (authStatusText) {
+                        authStatusText.textContent = isAuthenticated ? 'Authenticated' : 'Not Authenticated';
+                    }
+                }
+                
+                // CRITICAL: Update connection status to match authentication status
+                // Connection status should ALWAYS match authentication status
+                const connectionStatus = document.getElementById('connectionStatus');
+                const connectionDot = document.getElementById('connectionDot');
+                const connectionText = document.getElementById('connectionText');
+                if (connectionStatus && connectionDot && connectionText) {
+                    if (isAuthenticated) {
+                        connectionDot.className = 'status-dot connected';
+                        connectionText.textContent = 'Connected';
+                    } else {
+                        connectionDot.className = 'status-dot disconnected';
+                        connectionText.textContent = 'Disconnected';
+                    }
+                }
+                
+                // CRITICAL: Ensure authentication button matches connection status
+                // This is a duplicate check to ensure button state is always correct
+                // The button state should match the authenticated status
+                const authButton = document.getElementById('authStatus');
+                if (authButton && authButton !== authStatusEl) {
+                    // Only update if it's a different element
+                    if (isAuthenticated) {
+                        authButton.className = 'status-badge authenticated';
+                        authButton.innerHTML = '<i class="fas fa-check-circle"></i><span id="authStatusText">Authenticated</span>';
+                        authButton.onclick = null;
+                        authButton.removeAttribute('onclick');
+                        authButton.style.cursor = 'default';
+                        authButton.style.pointerEvents = 'none';
+                    } else {
+                        authButton.className = 'status-badge not-authenticated';
+                        // CRITICAL: Preserve onclick before updating innerHTML
+                        authButton.setAttribute('onclick', 'showAuthModal()');
+                        authButton.innerHTML = '<i class="fas fa-lock"></i><span id="authStatusText">Not Authenticated</span>';
+                        // CRITICAL: Set onclick handler after innerHTML update
+                        authButton.onclick = function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            console.log('[AUTH BUTTON] Clicked, opening modal...');
+                            showAuthModal();
+                        };
+                        authButton.style.cursor = 'pointer';
+                        authButton.style.pointerEvents = 'auto';
+                    }
+                }
+                
+                // CRITICAL: Ensure connection status ALWAYS matches authentication status
+                // Override any connectivity check results with authentication status
+                const connectionStatus2 = connectionStatus || document.getElementById('connectionStatus');
+                const connectionDot2 = connectionDot || document.getElementById('connectionDot');
+                const connectionText2 = connectionText || document.getElementById('connectionText');
+                if (connectionStatus2 && connectionDot2 && connectionText2) {
+                    if (isAuthenticated) {
+                        connectionDot2.className = 'status-dot connected';
+                        connectionText2.textContent = 'Connected';
+                    } else {
+                        connectionDot2.className = 'status-dot disconnected';
+                        connectionText2.textContent = 'Disconnected';
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking auth status:', error);
+                const authStatusEl = document.getElementById('authStatus');
+                if (authStatusEl) {
+                    authStatusEl.className = 'status-badge not-authenticated';
+                    authStatusEl.innerHTML = '<i class="fas fa-lock"></i><span id="authStatusText">Not Authenticated</span>';
+                    authStatusEl.onclick = showAuthModal;
+                }
+            }
+        }
+        
+        function updateAccountNameDisplay(accountName) {
+            if (!accountName) return;
+            
+            const accountNameDisplay = document.getElementById('accountNameDisplay');
+            const headerControls = document.querySelector('.header-controls');
+            
+            if (accountNameDisplay) {
+                // Update existing display
+                accountNameDisplay.textContent = accountName;
+                const accountNameContainer = accountNameDisplay.closest('.account-name-display');
+                if (accountNameContainer) {
+                    accountNameContainer.style.display = 'flex';
+                }
+            } else {
+                // Create account name display if it doesn't exist
+                if (headerControls) {
+                    // Check if account name display already exists
+                    let accountNameContainer = headerControls.querySelector('.account-name-display');
+                    
+                    if (!accountNameContainer) {
+                        // Create new container
+                        accountNameContainer = document.createElement('div');
+                        accountNameContainer.className = 'account-name-display';
+                        accountNameContainer.style.cssText = 'margin-right: 15px; padding: 8px 16px; background: rgba(102, 126, 234, 0.2); border-radius: 6px; border: 1px solid rgba(102, 126, 234, 0.3); display: flex; align-items: center;';
+                        accountNameContainer.innerHTML = `<i class="fas fa-user" style="margin-right: 8px;"></i><span id="accountNameDisplay" style="font-weight: 600; color: var(--text-primary);">${accountName}</span>`;
+                        
+                        // Try to insert before connectionStatus, but verify it's a child first
+                        const connectionStatus = document.getElementById('connectionStatus');
+                        if (connectionStatus && connectionStatus.parentNode === headerControls) {
+                            headerControls.insertBefore(accountNameContainer, connectionStatus);
+                        } else if (headerControls.firstChild) {
+                            // Insert at the beginning if connectionStatus is not a direct child
+                            headerControls.insertBefore(accountNameContainer, headerControls.firstChild);
+                        } else {
+                            // Just append if no children exist
+                            headerControls.appendChild(accountNameContainer);
+                        }
+                    } else {
+                        // Update existing container
+                        const span = accountNameContainer.querySelector('#accountNameDisplay');
+                        if (span) {
+                            span.textContent = accountName;
+                        }
+                        accountNameContainer.style.display = 'flex';
+                    }
+                }
+            }
+        }
+        
+        async function checkConnectivity() {
+            try {
+                // CRITICAL: First check authentication status - connectivity should match auth
+                const authResponse = await fetch('/api/auth/status');
+                if (authResponse.ok) {
+                    const authData = await authResponse.json();
+                    const isAuthenticated = authData.authenticated === true;
+                    
+                    // If not authenticated, set connection to disconnected immediately
+                    if (!isAuthenticated) {
+                        const connectionStatus = document.getElementById('connectionStatus');
+                        const connectionDot = document.getElementById('connectionDot');
+                        const connectionText = document.getElementById('connectionText');
+                        if (connectionStatus && connectionDot && connectionText) {
+                            connectionDot.className = 'status-dot disconnected';
+                            connectionText.textContent = 'Disconnected';
+                            connectionStatus.title = 'Not Authenticated';
+                        }
+                        return; // Don't check connectivity if not authenticated
+                    }
+                }
+                
+                // Only check connectivity if authenticated
+                const response = await fetch('/api/connectivity');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                
+                const connectionStatus = document.getElementById('connectionStatus');
+                const connectionDot = document.getElementById('connectionDot');
+                const connectionText = document.getElementById('connectionText');
+                
+                if (connectionStatus && connectionDot && connectionText) {
+                    // Only update if authenticated (double-check)
+                    const authStatusEl = document.getElementById('authStatus');
+                    const isAuth = authStatusEl && authStatusEl.classList.contains('authenticated');
+                    
+                    if (isAuth && data.connected && data.api_connected) {
+                        connectionDot.className = 'status-dot connected';
+                        connectionText.textContent = 'Connected';
+                        connectionStatus.title = data.status_message || 'System Connected';
+                    } else {
+                        connectionDot.className = 'status-dot disconnected';
+                        connectionText.textContent = 'Disconnected';
+                        connectionStatus.title = data.status_message || 'System Disconnected';
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking connectivity:', error);
+                const connectionDot = document.getElementById('connectionDot');
+                const connectionText = document.getElementById('connectionText');
+                if (connectionDot) connectionDot.className = 'status-dot disconnected';
+                if (connectionText) connectionText.textContent = 'Disconnected';
+            }
+        }
+        
+        function showAuthModal(event) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            console.log('[AUTH MODAL] showAuthModal called');
+            const modal = document.getElementById('authModal');
+            if (modal) {
+                console.log('[AUTH MODAL] Modal element found, showing...');
+                modal.classList.add('active');
+                // Also ensure modal is visible
+                modal.style.display = 'flex';
+                modal.style.zIndex = '10000';
+                // Focus the first input field
+                const firstInput = modal.querySelector('input');
+                if (firstInput) {
+                    setTimeout(() => firstInput.focus(), 100);
+                }
+            } else {
+                console.error('[AUTH MODAL] Modal element not found!');
+                alert('Authentication modal not found. Please refresh the page.');
+            }
+        }
+        
+        // Ensure showAuthModal is available globally immediately
+        window.showAuthModal = showAuthModal;
+        
+        // Also make it available before DOMContentLoaded
+        if (typeof window !== 'undefined') {
+            window.showAuthModal = showAuthModal;
+        }
+        
+        function hideAuthModal() {
+            const modal = document.getElementById('authModal');
+            const errorEl = document.getElementById('authError');
+            const errorElRequest = document.getElementById('authErrorRequest');
+            const tokenInput = document.getElementById('requestTokenInput');
+            const accessTokenInput = document.getElementById('accessTokenInput');
+            const apiKeyInput = document.getElementById('apiKeyInput');
+            const apiSecretInput = document.getElementById('apiSecretInput');
+            const accessTokenApiKey = document.getElementById('accessTokenApiKey');
+            const accessTokenApiSecret = document.getElementById('accessTokenApiSecret');
+            
+            if (modal) {
+                modal.classList.remove('active');
+                modal.style.display = 'none';
+            }
+            if (errorEl) {
+                errorEl.classList.remove('show');
+                errorEl.textContent = '';
+            }
+            if (errorElRequest) {
+                errorElRequest.classList.remove('show');
+                errorElRequest.textContent = '';
+            }
+            if (tokenInput) tokenInput.value = '';
+            if (accessTokenInput) accessTokenInput.value = '';
+            if (apiKeyInput) apiKeyInput.value = '';
+            if (apiSecretInput) apiSecretInput.value = '';
+            if (accessTokenApiKey) accessTokenApiKey.value = '';
+            if (accessTokenApiSecret) accessTokenApiSecret.value = '';
+        }
+        
+        function switchAuthTab(tab) {
+            const accessTokenTab = document.getElementById('tabAccessToken');
+            const requestTokenTab = document.getElementById('tabRequestToken');
+            const accessTokenForm = document.getElementById('accessTokenForm');
+            const requestTokenForm = document.getElementById('requestTokenForm');
+            
+            if (tab === 'accessToken') {
+                if (accessTokenForm) accessTokenForm.classList.add('active');
+                if (requestTokenForm) requestTokenForm.classList.remove('active');
+                if (accessTokenTab) accessTokenTab.classList.add('active');
+                if (requestTokenTab) requestTokenTab.classList.remove('active');
+            } else {
+                if (accessTokenForm) accessTokenForm.classList.remove('active');
+                if (requestTokenForm) requestTokenForm.classList.add('active');
+                if (accessTokenTab) accessTokenTab.classList.remove('active');
+                if (requestTokenTab) requestTokenTab.classList.add('active');
+            }
+        }
+        
+        async function authenticateWithAccessToken(event) {
+            event.preventDefault();
+            const apiKey = document.getElementById('accessTokenApiKey').value.trim();
+            const apiSecret = document.getElementById('accessTokenApiSecret').value.trim();
+            const accessToken = document.getElementById('accessTokenInput').value.trim();
+            const errorEl = document.getElementById('authError');
+            const submitBtn = event.target.querySelector('button[type="submit"]');
+            
+            if (!accessToken) {
+                if (errorEl) {
+                    errorEl.textContent = 'Please enter an access token';
+                    errorEl.classList.add('show');
+                }
+                return;
+            }
+            
+            try {
+                if (errorEl) errorEl.classList.remove('show');
+                if (submitBtn) {
+                    submitBtn.disabled = true;
+                    submitBtn.innerHTML = '<span class="loading-spinner"></span> Connecting...';
+                }
+                
+                const requestBody = {access_token: accessToken};
+                if (apiKey) {
+                    requestBody.api_key = apiKey;
+                }
+                if (apiSecret) {
+                    requestBody.api_secret = apiSecret;
+                }
+                
+                const response = await fetch('/api/auth/set-access-token', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(requestBody)
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    hideAuthModal();
+                    // Update account name display if provided
+                    if (data.account_name) {
+                        updateAccountNameDisplay(data.account_name);
+                    }
+                    // Immediately update auth status (don't wait for polling)
+                    await checkAuthStatus();
+                    checkConnectivity();
+                    // Show success notification
+                    showNotification('Successfully connected with access token!', 'success');
+                    // Refresh data after authentication
+                    setTimeout(() => {
+                        loadMetrics();
+                        loadAllPositions();
+                    }, 1000);
+                } else {
+                    if (errorEl) {
+                        errorEl.textContent = data.error || 'Connection failed';
+                        errorEl.classList.add('show');
+                    }
+                }
+            } catch (error) {
+                console.error('Set access token error:', error);
+                if (errorEl) {
+                    errorEl.textContent = 'Error: ' + error.message;
+                    errorEl.classList.add('show');
+                }
+            } finally {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fas fa-plug"></i> Connect';
+                }
+            }
+        }
+        
+        async function authenticateWithRequestToken(event) {
+            event.preventDefault();
+            const apiKey = document.getElementById('apiKeyInput').value.trim();
+            const apiSecret = document.getElementById('apiSecretInput').value.trim();
+            const requestToken = document.getElementById('requestTokenInput').value.trim();
+            const errorEl = document.getElementById('authErrorRequest');
+            const submitBtn = event.target.querySelector('button[type="submit"]');
+            
+            if (!apiKey || !apiSecret || !requestToken) {
+                if (errorEl) {
+                    errorEl.textContent = 'Please enter API key, API secret, and request token';
+                    errorEl.classList.add('show');
+                }
+                return;
+            }
+            
+            try {
+                if (errorEl) errorEl.classList.remove('show');
+                if (submitBtn) {
+                    submitBtn.disabled = true;
+                    submitBtn.innerHTML = '<span class="loading-spinner"></span> Authenticating...';
+                }
+                
+                // First, set API credentials
+                const setCredsResponse = await fetch('/api/auth/set-credentials', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        api_key: apiKey,
+                        api_secret: apiSecret
+                    })
+                });
+                
+                if (!setCredsResponse.ok) {
+                    throw new Error('Failed to set API credentials');
+                }
+                
+                // Then authenticate with request token
+                const response = await fetch('/api/auth/authenticate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        request_token: requestToken,
+                        api_key: apiKey,
+                        api_secret: apiSecret
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    hideAuthModal();
+                    // Update account name display if provided
+                    if (data.account_name) {
+                        updateAccountNameDisplay(data.account_name);
+                    }
+                    // Immediately update auth status (don't wait for polling)
+                    await                     // Immediately update auth status (don't wait for polling)
+                    await checkAuthStatus();
+                    checkConnectivity();
+                    // Show success notification
+                    showNotification('Successfully authenticated!', 'success');
+                    // Refresh data after authentication
+                    setTimeout(() => {
+                        loadMetrics();
+                        loadAllPositions();
+                    }, 1000);
+                } else {
+                    if (errorEl) {
+                        errorEl.textContent = data.error || 'Authentication failed';
+                        errorEl.classList.add('show');
+                    }
+                }
+            } catch (error) {
+                console.error('Authentication error:', error);
+                if (errorEl) {
+                    errorEl.textContent = 'Error: ' + error.message;
+                    errorEl.classList.add('show');
+                }
+            } finally {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fas fa-key"></i> Authenticate';
+                }
+            }
+        }
+        
+        function showNotification(message, type = 'info') {
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 16px 24px;
+                background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6'};
+                color: white;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                z-index: 10001;
+                animation: slideIn 0.3s ease-out;
+            `;
+            notification.textContent = message;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease-out';
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+        
+        function updateKiteLoginLink() {
+            const apiKeyInput = document.getElementById('apiKeyInput');
+            const kiteLoginLink = document.getElementById('kiteLoginLink');
+            if (apiKeyInput && kiteLoginLink) {
+                const apiKey = apiKeyInput.value.trim();
+                if (apiKey) {
+                    kiteLoginLink.href = `https://kite.trade/connect/login?api_key=${apiKey}`;
+                } else {
+                    kiteLoginLink.href = 'https://kite.trade/connect/login';
+                }
+            }
+        }
+        
+        function formatCurrency(value) {
+            return '₹' + parseFloat(value).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        
+        function formatDateTime(dateString) {
+            if (!dateString) return 'N/A';
+            const date = new Date(dateString);
+            return date.toLocaleString('en-IN', { 
+                day: '2-digit', 
+                month: '2-digit', 
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (updateInterval) {
+                clearInterval(updateInterval);
+            }
+        });
+    </script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>
