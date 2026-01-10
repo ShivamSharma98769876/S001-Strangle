@@ -92,7 +92,7 @@ class AzureBlobStorageHandler(logging.Handler):
     Custom logging handler that writes logs to Azure Blob Storage
     Supports both buffered mode (default) and streaming mode (real-time)
     """
-    def __init__(self, connection_string, container_name, blob_path, account_name=None, streaming_mode=False):
+    def __init__(self, connection_string, container_name, blob_path, account_name=None, streaming_mode=False, skip_container_check=False):
         super().__init__()
         self.connection_string = connection_string
         self.container_name = container_name
@@ -104,7 +104,14 @@ class AzureBlobStorageHandler(logging.Handler):
         self.flush_interval = 30 if not streaming_mode else 0  # Flush immediately in streaming mode
         import time
         self.last_flush = time.time()
-        self._ensure_container_exists()
+        self.container_checked = False
+        # Skip container check during initialization for fast startup (prevents 504 timeout)
+        # Container will be checked/created on first write
+        if not skip_container_check:
+            self._ensure_container_exists()
+        else:
+            # Defer container check to first write (non-blocking startup)
+            self.container_checked = False
         
         if streaming_mode:
             print(f"[AZURE BLOB] Streaming mode ENABLED - logs will be written in real-time")
@@ -271,10 +278,20 @@ class AzureBlobStorageHandler(logging.Handler):
     
     def _flush_to_blob(self, force=False):
         """Flush buffer contents to Azure Blob Storage
-        
+
         Args:
             force: If True, create blob even if buffer is empty (for initial blob creation)
         """
+        # Check container on first flush if it wasn't checked during initialization (fast startup)
+        if not self.container_checked:
+            try:
+                self._ensure_container_exists()
+                self.container_checked = True
+            except Exception as e:
+                # If container check fails, log but continue (non-blocking)
+                print(f"[AZURE BLOB] Container check deferred failed: {e}")
+                self.container_checked = True  # Mark as checked to prevent retry loops
+        
         try:
             with self.buffer_lock:
                 # Get current buffer content
@@ -427,10 +444,19 @@ class AzureBlobStorageHandler(logging.Handler):
     
     def flush(self, force=False):
         """Flush any buffered logs to Azure Blob Storage
-        
+
         Args:
             force: If True, create blob even if buffer is empty (for initial blob creation)
         """
+        # Check container on first flush if it wasn't checked during initialization (fast startup)
+        if not self.container_checked:
+            try:
+                self._ensure_container_exists()
+                self.container_checked = True
+            except Exception as e:
+                # If container check fails, log but continue (non-blocking)
+                print(f"[AZURE BLOB] Container check deferred failed: {e}")
+                self.container_checked = True  # Mark as checked to prevent retry loops
         self._flush_to_blob(force=force)
         super().flush()
     
@@ -727,12 +753,15 @@ def setup_azure_blob_logging(account_name=None, logger_name='root', streaming_mo
         
         # Create Azure Blob handler
         try:
+            # Skip container check during initialization if skip_verification is True (fast startup)
+            # Container will be checked/created on first log write
             blob_handler = AzureBlobStorageHandler(
                 connection_string=connection_string,
                 container_name=container_name,
                 blob_path=blob_path,
                 account_name=account_name,
-                streaming_mode=streaming_mode  # Enable streaming for real-time logs
+                streaming_mode=streaming_mode,  # Enable streaming for real-time logs
+                skip_container_check=skip_verification  # Skip container check for fast startup
             )
 
             # Set formatter (same format as file handler)

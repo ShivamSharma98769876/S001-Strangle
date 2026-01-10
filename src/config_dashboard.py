@@ -33,19 +33,8 @@ from config_monitor import get_config_monitor
 # Import session manager
 from src.security.saas_session_manager import SaaSSessionManager
 
-# Print Azure Blob Storage diagnostic info BEFORE importing config
-print("=" * 60)
-print("[STARTUP] Checking Azure Blob Storage Configuration...")
-print("=" * 60)
-azure_blob_key = os.getenv('AzureBlobStorageKey')
-azure_blob_account = os.getenv('AZURE_BLOB_ACCOUNT_NAME')
-azure_blob_container = os.getenv('AZURE_BLOB_CONTAINER_NAME')
-azure_blob_enabled = os.getenv('AZURE_BLOB_LOGGING_ENABLED', 'False')
-print(f"[STARTUP] AzureBlobStorageKey: {'SET' if azure_blob_key else 'NOT SET'}")
-print(f"[STARTUP] AZURE_BLOB_ACCOUNT_NAME: '{azure_blob_account}' ({'SET' if azure_blob_account else 'NOT SET'})")
-print(f"[STARTUP] AZURE_BLOB_CONTAINER_NAME: '{azure_blob_container}' ({'SET' if azure_blob_container else 'NOT SET'})")
-print(f"[STARTUP] AZURE_BLOB_LOGGING_ENABLED: '{azure_blob_enabled}' -> {azure_blob_enabled.lower() == 'true'}")
-print("=" * 60)
+# Azure Blob Storage diagnostic info - moved to lazy loading to speed up startup
+# This will be printed after health endpoint is registered
 
 # Import dashboard configuration
 try:
@@ -97,9 +86,12 @@ app = Flask(__name__,
 @app.route('/health')
 @app.route('/healthz')
 def health_check_early():
-    """Health check endpoint for Azure App Service startup probe - must respond immediately"""
-    # Return immediately - minimal response for fastest startup probe success
-    # Flask will automatically convert dict to JSON response
+    """
+    Health check endpoint for Azure App Service startup probe - must respond immediately.
+    This endpoint has ZERO dependencies and responds instantly.
+    """
+    # Return immediately - absolutely minimal response (no imports, no dependencies)
+    # This is critical for Azure startup probe to succeed
     return {'status': 'healthy', 'service': 'trading-bot-dashboard'}, 200
 
 # Note: Root route '/' will be defined later for the dashboard
@@ -161,13 +153,38 @@ if REDIS_URL:
         logger.warning(f"[SESSION] Redis configuration failed: {e}. Using Flask's built-in session storage.")
 else:
     # No Redis URL - use Flask's built-in session storage (perfect for local and single server cloud)
+    # This is the SAME approach as disciplined-Trader - works perfectly for single instance with multiple sessions
     logger.info("[SESSION] Using Flask's built-in session storage (works for local and single server cloud)")
+    logger.info("[SESSION] ✅ Single instance mode: Multiple sessions supported (no Redis needed)")
 
 # Setup file logging (logger already initialized above)
 # Add file handler to existing logger
 file_handler = logging.FileHandler('dashboard.log', encoding='utf-8')
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 logger.addHandler(file_handler)
+
+# Print Azure Blob Storage diagnostic info AFTER health endpoint is registered (lazy loading)
+# This ensures health endpoint responds immediately
+def print_azure_blob_diagnostics():
+    """Print Azure Blob Storage configuration (called after health endpoint is ready)"""
+    try:
+        azure_blob_key = os.getenv('AzureBlobStorageKey')
+        azure_blob_account = os.getenv('AZURE_BLOB_ACCOUNT_NAME')
+        azure_blob_container = os.getenv('AZURE_BLOB_CONTAINER_NAME')
+        azure_blob_enabled = os.getenv('AZURE_BLOB_LOGGING_ENABLED', 'False')
+        logger.info("=" * 60)
+        logger.info("[STARTUP] Azure Blob Storage Configuration:")
+        logger.info(f"  AzureBlobStorageKey: {'SET' if azure_blob_key else 'NOT SET'}")
+        logger.info(f"  AZURE_BLOB_ACCOUNT_NAME: '{azure_blob_account}' ({'SET' if azure_blob_account else 'NOT SET'})")
+        logger.info(f"  AZURE_BLOB_CONTAINER_NAME: '{azure_blob_container}' ({'SET' if azure_blob_container else 'NOT SET'})")
+        logger.info(f"  AZURE_BLOB_LOGGING_ENABLED: '{azure_blob_enabled}' -> {azure_blob_enabled.lower() == 'true'}")
+        logger.info("=" * 60)
+    except Exception as e:
+        logger.warning(f"Error printing Azure Blob diagnostics: {e}")
+
+# Call diagnostics after a short delay (non-blocking)
+import threading
+threading.Timer(1.0, print_azure_blob_diagnostics).start()
 
 # Setup Azure Blob Storage logging if enabled
 # Try to get account name from saved token first
@@ -215,10 +232,13 @@ def setup_dashboard_blob_logging():
             if account_name_for_logging:
                 print(f"[STARTUP] Account name for logging: {account_name_for_logging}")
             
+            # Use skip_verification=True for fast startup (prevents 504 timeout)
+            # Verification will happen on first log write
             blob_handler, blob_path = setup_azure_blob_logging(
                 account_name=account_name_for_logging, 
                 logger_name=__name__,
-                streaming_mode=True  # Enable streaming logs
+                streaming_mode=True,  # Enable streaming logs
+                skip_verification=True  # Skip network calls during startup (fast startup)
             )
             if blob_handler:
                 logger.info(f"[STARTUP] Azure Blob Storage logging enabled: {blob_path}")
@@ -233,10 +253,23 @@ def setup_dashboard_blob_logging():
         print(traceback.format_exc())
         return None, None
 
-# Setup blob logging on startup
-setup_dashboard_blob_logging()
+# CRITICAL: Azure Blob Storage setup moved to lazy loading (background thread)
+# This prevents blocking startup and 504 timeout errors
+# The health endpoint must respond immediately, so blob storage setup happens after
+def setup_blob_logging_lazy():
+    """Setup Azure Blob logging in background thread (non-blocking)"""
+    try:
+        # Wait a moment to ensure health endpoint is ready
+        time.sleep(2)
+        setup_dashboard_blob_logging()
+    except Exception as e:
+        logger.warning(f"Error in lazy blob logging setup: {e}")
 
-logger.info("[DASHBOARD] Dashboard application initialized")
+# Start blob logging setup in background thread (non-blocking)
+blob_setup_thread = threading.Thread(target=setup_blob_logging_lazy, daemon=True)
+blob_setup_thread.start()
+
+logger.info("[DASHBOARD] Dashboard application initialized (Azure Blob Storage setup in background)")
 
 # Authentication decorator for routes that require JWT token
 def require_authentication(f):
