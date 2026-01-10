@@ -22,25 +22,42 @@ fi
 export PYTHONPATH="${PYTHONPATH}:$(pwd):$(pwd)/src"
 
 # Get port from environment (Azure provides this)
+# Azure App Service uses HTTP_PLATFORM_PORT or PORT
 PORT=${PORT:-${HTTP_PLATFORM_PORT:-8080}}
-echo "Using port: $PORT"
+echo "=========================================="
+echo "Port Configuration:"
+echo "  PORT: ${PORT}"
+echo "  HTTP_PLATFORM_PORT: ${HTTP_PLATFORM_PORT:-not set}"
+echo "  Using port: $PORT"
+echo "=========================================="
 
 # Start the Flask dashboard application
 # For Azure, we start the dashboard which provides the web interface
 echo "Starting Flask dashboard..."
 cd "$(dirname "$0")" || exit 1
 
+# Verify wsgi.py exists
+if [ -f "wsgi.py" ]; then
+    echo "✓ Found wsgi.py - using as WSGI entry point"
+else
+    echo "⚠ Warning: wsgi.py not found, will use direct import"
+fi
+
 # Try gunicorn first (better for production), fallback to Flask dev server
 if command -v gunicorn &> /dev/null; then
-    echo "Starting with gunicorn..."
+    echo "✓ Gunicorn found - starting with gunicorn..."
+    echo "  Binding to: 0.0.0.0:$PORT"
+    echo "  Health check endpoint: /health or /healthz"
+    echo "  Starting workers..."
+    
     # Use wsgi.py if it exists (standard WSGI entry point), otherwise use direct import
     if [ -f "wsgi.py" ]; then
-        exec gunicorn --bind 0.0.0.0:$PORT --timeout 600 --workers 1 --threads 2 --access-logfile - --error-logfile - --log-level info "wsgi:app"
+        exec gunicorn --bind 0.0.0.0:$PORT --timeout 600 --workers 1 --threads 2 --access-logfile - --error-logfile - --log-level info --preload "wsgi:app"
     else
-        exec gunicorn --bind 0.0.0.0:$PORT --timeout 600 --workers 1 --threads 2 --access-logfile - --error-logfile - --log-level info "src.config_dashboard:app"
+        exec gunicorn --bind 0.0.0.0:$PORT --timeout 600 --workers 1 --threads 2 --access-logfile - --error-logfile - --log-level info --preload "src.config_dashboard:app"
     fi
 else
-    echo "Starting with Flask (gunicorn not found, using dev server)..."
+    echo "⚠ Gunicorn not found - using Flask development server (not recommended for production)"
     python -c "
 import sys
 import os
