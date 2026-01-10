@@ -980,6 +980,15 @@
         }
     </style>
     <script>
+        // Suppress SSO token errors in console (from URL parameters)
+        window.addEventListener('error', function(e) {
+            if (e.message && (e.message.includes('sso_token') || e.message.includes('SSO'))) {
+                e.preventDefault();
+                console.log('[INFO] Suppressed SSO token error (expected behavior)');
+                return true;
+            }
+        });
+        
         // Ensure showAuthModal is available immediately, even before DOMContentLoaded
         function showAuthModal(event) {
             if (event) {
@@ -2916,34 +2925,39 @@
         }
         
         function hideAuthModal() {
-            const modal = document.getElementById('authModal');
-            const errorEl = document.getElementById('authError');
-            const errorElRequest = document.getElementById('authErrorRequest');
-            const tokenInput = document.getElementById('requestTokenInput');
-            const accessTokenInput = document.getElementById('accessTokenInput');
-            const apiKeyInput = document.getElementById('apiKeyInput');
-            const apiSecretInput = document.getElementById('apiSecretInput');
-            const accessTokenApiKey = document.getElementById('accessTokenApiKey');
-            const accessTokenApiSecret = document.getElementById('accessTokenApiSecret');
-            
-            if (modal) {
-                modal.classList.remove('active');
-                modal.style.display = 'none';
+            try {
+                const modal = document.getElementById('authModal');
+                const errorEl = document.getElementById('authError');
+                const errorElRequest = document.getElementById('authErrorRequest');
+                const tokenInput = document.getElementById('requestTokenInput');
+                const accessTokenInput = document.getElementById('accessTokenInput');
+                const apiKeyInput = document.getElementById('apiKeyInput');
+                const apiSecretInput = document.getElementById('apiSecretInput');
+                const accessTokenApiKey = document.getElementById('accessTokenApiKey');
+                const accessTokenApiSecret = document.getElementById('accessTokenApiSecret');
+                
+                if (modal) {
+                    modal.classList.remove('active');
+                    modal.style.display = 'none';
+                    modal.style.zIndex = '';
+                }
+                if (errorEl) {
+                    errorEl.classList.remove('show');
+                    errorEl.textContent = '';
+                }
+                if (errorElRequest) {
+                    errorElRequest.classList.remove('show');
+                    errorElRequest.textContent = '';
+                }
+                if (tokenInput) tokenInput.value = '';
+                if (accessTokenInput) accessTokenInput.value = '';
+                if (apiKeyInput) apiKeyInput.value = '';
+                if (apiSecretInput) apiSecretInput.value = '';
+                if (accessTokenApiKey) accessTokenApiKey.value = '';
+                if (accessTokenApiSecret) accessTokenApiSecret.value = '';
+            } catch (error) {
+                console.error('[AUTH MODAL] Error hiding modal:', error);
             }
-            if (errorEl) {
-                errorEl.classList.remove('show');
-                errorEl.textContent = '';
-            }
-            if (errorElRequest) {
-                errorElRequest.classList.remove('show');
-                errorElRequest.textContent = '';
-            }
-            if (tokenInput) tokenInput.value = '';
-            if (accessTokenInput) accessTokenInput.value = '';
-            if (apiKeyInput) apiKeyInput.value = '';
-            if (apiSecretInput) apiSecretInput.value = '';
-            if (accessTokenApiKey) accessTokenApiKey.value = '';
-            if (accessTokenApiSecret) accessTokenApiSecret.value = '';
         }
         
         function switchAuthTab(tab) {
@@ -3005,7 +3019,12 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    hideAuthModal();
+                    // Close modal first, then update UI
+                    try {
+                        hideAuthModal();
+                    } catch (e) {
+                        console.error('[AUTH] Error closing modal:', e);
+                    }
                     // Update account name display if provided
                     if (data.account_name) {
                         updateAccountNameDisplay(data.account_name);
@@ -3095,13 +3114,17 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    hideAuthModal();
+                    // Close modal first, then update UI
+                    try {
+                        hideAuthModal();
+                    } catch (e) {
+                        console.error('[AUTH] Error closing modal:', e);
+                    }
                     // Update account name display if provided
                     if (data.account_name) {
                         updateAccountNameDisplay(data.account_name);
                     }
                     // Immediately update auth status (don't wait for polling)
-                    await                     // Immediately update auth status (don't wait for polling)
                     await checkAuthStatus();
                     checkConnectivity();
                     // Show success notification

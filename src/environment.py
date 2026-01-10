@@ -984,25 +984,11 @@ def setup_azure_logging(logger_name='root', account_name=None):
         # Ensure named logger propagates to root (default behavior, but make explicit)
         logger.propagate = True
         
-        # Setup Azure Blob Storage logging
+        # FILE-BASED LOGGING ONLY (like disciplined-Trader)
+        # Azure Blob logging removed for better performance and simplicity
         prefix = "[STRATEGY]" if account_name else "[DASHBOARD]"
-        print(f"{prefix} [LOG SETUP] Setting up Azure Blob Storage logging for account: {account_name}")
-        # For dashboard (no account_name), skip verification for fast startup to prevent 504 timeout
-        skip_verification = (account_name is None)  # Skip verification for dashboard startup
-        blob_handler, blob_path = setup_azure_blob_logging(
-            account_name=account_name, 
-            logger_name=logger_name,
-            streaming_mode=True,  # Enable streaming for real-time logs
-            skip_verification=skip_verification  # Fast startup for dashboard
-        )
-        if blob_handler:
-            logger.info(f"[LOG SETUP] Azure Blob Storage logging enabled: {blob_path}")
-            print(f"{prefix} [LOG SETUP] SUCCESS: Azure Blob Storage logging configured: {blob_path}")
-            if account_name:
-                print(f"{prefix} [LOG SETUP] Strategy logs will be written to: s0001strangle/{blob_path}")
-        else:
-            print(f"{prefix} [LOG SETUP] ERROR: Azure Blob Storage logging NOT configured (check environment variables)")
-            logger.warning(f"[LOG SETUP] Azure Blob Storage logging not available - check environment variables")
+        print(f"{prefix} [LOG SETUP] Using file-based logging only (Azure Blob disabled)")
+        logger.info(f"[LOG SETUP] File-based logging enabled: {log_file}")
         
         # Force file creation by writing an initial log message
         # This ensures the file exists immediately
@@ -1123,17 +1109,11 @@ def setup_local_logging(log_dir=None, account_name=None, logger_name='root'):
         # Ensure named logger propagates to root (default behavior, but make explicit)
         logger.propagate = True
         
-        # Setup Azure Blob Storage logging
-        # For dashboard (no account_name), skip verification for fast startup to prevent 504 timeout
-        skip_verification = (account_name is None)  # Skip verification for dashboard startup
-        blob_handler, blob_path = setup_azure_blob_logging(
-            account_name=account_name, 
-            logger_name=logger_name,
-            streaming_mode=True,  # Enable streaming for real-time logs
-            skip_verification=skip_verification  # Fast startup for dashboard
-        )
-        if blob_handler:
-            logger.info(f"[LOG SETUP] Azure Blob Storage logging enabled: {blob_path}")
+        # FILE-BASED LOGGING ONLY (like disciplined-Trader)
+        # Azure Blob logging removed for better performance and simplicity
+        prefix = "[STRATEGY]" if account_name else "[DASHBOARD]"
+        print(f"{prefix} [LOG SETUP] Using file-based logging only (Azure Blob disabled)")
+        logger.info(f"[LOG SETUP] File-based logging enabled: {log_filename}")
         
         # Force file creation by writing an initial log message
         # This ensures the file exists immediately

@@ -1487,44 +1487,44 @@ def start_strategy():
 @app.route('/live/', methods=['GET'], strict_slashes=False)
 @require_authentication_page
 def live_trader_page():
-    """Live Trader dedicated page - Requires authentication (STRICT on cloud)"""
+    """Live Trader dedicated page - Requires authentication (STRICT on cloud) - OPTIMIZED"""
     try:
-        # Additional strict check for cloud environments
-        if IS_PRODUCTION:
-            creds = SaaSSessionManager.get_credentials()
-            if not creds.get('access_token'):
-                logging.warning(f"[LIVE TRADER] Unauthorized access attempt from {request.remote_addr} on cloud - missing access token")
-                return render_template('auth_required.html', 
-                                     message='Authentication required. Access token not found. Please authenticate through the main application.'), 401
-        
-        # Verify authentication (decorator already checks, but double-check here)
-        if not SaaSSessionManager.is_authenticated():
-            return render_template('auth_required.html', 
-                                 message='JWT token not associated. Please navigate through main application to authenticate.'), 401
-        
-        # Get credentials from session
+        # Get credentials from session ONCE (optimized - no duplicate calls)
         creds = SaaSSessionManager.get_credentials()
+        
+        # Quick authentication check (decorator already validated, but double-check for cloud)
+        if IS_PRODUCTION and not creds.get('access_token'):
+            logging.warning(f"[LIVE TRADER] Unauthorized access attempt from {request.remote_addr} on cloud - missing access token")
+            return render_template('auth_required.html', 
+                                 message='Authentication required. Access token not found. Please authenticate through the main application.'), 401
+        
+        # Get account name (optimized - single call)
         account_name_display = creds.get('full_name') or creds.get('account_name') or 'Trading Account'
         
-        # Sync global variables from session
+        # Sync global variables from session (lazy - only if needed)
         global account_holder_name, kite_api_key, kite_api_secret, kite_client_global
         account_holder_name = account_name_display
-        kite_api_key = creds.get('api_key', '')
-        kite_api_secret = creds.get('api_secret', '')
         
-        # Ensure kite_client_global is set if we have credentials
-        if creds.get('access_token') and kite_api_key and kite_api_secret and not kite_client_global:
-            try:
-                from src.kite_client import KiteClient
-            except ImportError:
-                from kite_client import KiteClient
-            kite_client_global = KiteClient(
-                kite_api_key,
-                kite_api_secret,
-                access_token=creds.get('access_token'),
-                account=account_name_display
-            )
+        # Lazy initialization of KiteClient - only if not already set and credentials exist
+        # This avoids unnecessary initialization on every page load
+        if creds.get('access_token') and creds.get('api_key') and creds.get('api_secret'):
+            kite_api_key = creds.get('api_key', '')
+            kite_api_secret = creds.get('api_secret', '')
+            
+            # Only create KiteClient if not already initialized (avoid re-initialization)
+            if not kite_client_global or not hasattr(kite_client_global, 'access_token') or kite_client_global.access_token != creds.get('access_token'):
+                try:
+                    from src.kite_client import KiteClient
+                except ImportError:
+                    from kite_client import KiteClient
+                kite_client_global = KiteClient(
+                    kite_api_key,
+                    kite_api_secret,
+                    access_token=creds.get('access_token'),
+                    account=account_name_display
+                )
         
+        # Render template immediately (no database initialization here)
         return render_template('live_trader.html', account_holder_name=account_name_display)
     except Exception as e:
         logging.error(f"[LIVE TRADER] Error loading page: {e}")
