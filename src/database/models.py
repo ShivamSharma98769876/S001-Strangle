@@ -217,8 +217,18 @@ class DatabaseManager:
         logger.info(f"Database connection initialized (s001 tables)")
     
     def create_tables(self):
-        """Create all tables"""
-        Base.metadata.create_all(bind=self.engine)
+        """Create all tables (ignores existing tables/indexes)"""
+        try:
+            Base.metadata.create_all(bind=self.engine, checkfirst=True)
+        except Exception as e:
+            # Log but don't fail if tables/indexes already exist
+            import logging
+            logger = logging.getLogger("database")
+            if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
+                logger.warning(f"Some tables/indexes already exist (non-critical): {e}")
+            else:
+                logger.error(f"Error creating tables: {e}")
+                raise
     
     def get_session(self):
         """Get a database session"""

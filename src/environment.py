@@ -15,10 +15,10 @@ import sys
 # ============================================================================
 # These credentials will be used when running in Azure environment
 # Update these values with your Azure Blob Storage credentials
-AZURE_BLOB_CONNECTION_STRING_HARDCODED = "DefaultEndpointsProtocol=https;AccountName=s0001s0001;AccountKey=o1t4swp/blCqs68G8ibe3J2p17FBf5FIGTRqr2iFeif/KsZXPNShmyVMZuBKbFtzU2csyjmPXhhF+AStCPP2xA==;EndpointSuffix=core.windows.net"
-AZURE_BLOB_STORAGE_ACCOUNT_NAME_HARDCODED = "s0001s0001"
-AZURE_BLOB_STORAGE_KEY_HARDCODED = "o1t4swp/blCqs68G8ibe3J2p17FBf5FIGTRqr2iFeif/KsZXPNShmyVMZuBKbFtzU2csyjmPXhhF+AStCPP2xA=="
-AZURE_BLOB_CONTAINER_NAME_HARDCODED = "str-container1"
+AZURE_BLOB_CONNECTION_STRING_HARDCODED = "DefaultEndpointsProtocol=https;AccountName=a001storage;AccountKey=HhyHFmea7TsmbuAyysRDwJNs2CtTLvaTmTlzRy8rHuzTtD70/E33jDDpP5oAfW/BG1PjnXHzSN4X+AStG5GXtw==;EndpointSuffix=core.windows.net"
+AZURE_BLOB_STORAGE_ACCOUNT_NAME_HARDCODED = "a001storage"
+AZURE_BLOB_STORAGE_KEY_HARDCODED = "HhyHFmea7TsmbuAyysRDwJNs2CtTLvaTmTlzRy8rHuzTtD70/E33jDDpP5oAfW/BG1PjnXHzSN4X+AStG5GXtw=="
+AZURE_BLOB_CONTAINER_NAME_HARDCODED = "a001-strangle"
 AZURE_BLOB_LOGGING_ENABLED_HARDCODED = True  # Set to True to enable blob logging in Azure
 
 # Safe formatter that handles Unicode encoding errors gracefully
@@ -118,7 +118,8 @@ class AzureBlobStorageHandler(logging.Handler):
                 ClientAuthenticationError, 
                 HttpResponseError, 
                 ResourceExistsError,
-                ResourceNotFoundError
+                ResourceNotFoundError,
+                ServiceRequestError
             )
             
             blob_service_client = BlobServiceClient.from_connection_string(self.connection_string)
@@ -136,6 +137,23 @@ class AzureBlobStorageHandler(logging.Handler):
                     print(f"[AZURE BLOB] ✓✓ Verified: Container '{self.container_name}' exists")
                 else:
                     print(f"[AZURE BLOB] ⚠ Warning: Container '{self.container_name}' creation verification failed")
+                    
+        except ServiceRequestError as dns_error:
+            # DNS resolution failure - storage account may not exist or network issue
+            error_msg = str(dns_error)
+            print(f"[AZURE BLOB] ✗✗✗ DNS/Network Error: Failed to resolve storage account hostname")
+            print(f"[AZURE BLOB] Error Details: {error_msg}")
+            print(f"[AZURE BLOB] ========================================")
+            print(f"[AZURE BLOB] TROUBLESHOOTING:")
+            print(f"[AZURE BLOB] 1. Verify storage account name is correct: {AZURE_BLOB_STORAGE_ACCOUNT_NAME_HARDCODED}")
+            print(f"[AZURE BLOB] 2. Check if storage account exists in Azure Portal")
+            print(f"[AZURE BLOB] 3. Verify network connectivity to Azure")
+            print(f"[AZURE BLOB] 4. Check DNS resolution (storage account may have been deleted or renamed)")
+            print(f"[AZURE BLOB] 5. Application will continue without Azure Blob Storage logging")
+            print(f"[AZURE BLOB] ========================================")
+            # Don't raise - allow application to continue without blob storage
+            # This prevents the entire app from failing if blob storage is unavailable
+            return
                     
         except ClientAuthenticationError as auth_error:
             print(f"[AZURE BLOB] ✗✗✗ AUTHENTICATION ERROR: Invalid credentials or connection string")
@@ -663,17 +681,24 @@ def setup_azure_blob_logging(account_name=None, logger_name='root', streaming_mo
         print(f"{prefix} [AZURE BLOB] ========================================")
         
         # Create Azure Blob handler
-        blob_handler = AzureBlobStorageHandler(
-            connection_string=connection_string,
-            container_name=container_name,
-            blob_path=blob_path,
-            account_name=account_name,
-            streaming_mode=streaming_mode  # Enable streaming for real-time logs
-        )
-        
-        # Set formatter (same format as file handler)
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        blob_handler.setFormatter(formatter)
+        try:
+            blob_handler = AzureBlobStorageHandler(
+                connection_string=connection_string,
+                container_name=container_name,
+                blob_path=blob_path,
+                account_name=account_name,
+                streaming_mode=streaming_mode  # Enable streaming for real-time logs
+            )
+
+            # Set formatter (same format as file handler)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            blob_handler.setFormatter(formatter)
+        except Exception as handler_error:
+            # Catch any errors during handler creation (including DNS errors from _ensure_container_exists)
+            error_type = type(handler_error).__name__
+            print(f"{prefix} [AZURE BLOB] ✗ Failed to create Azure Blob Storage handler: {error_type}: {handler_error}")
+            print(f"{prefix} [AZURE BLOB] Application will continue without Azure Blob Storage logging")
+            return None, None
         blob_handler.setLevel(logging.INFO)
         
         # Add handler to logger

@@ -136,15 +136,17 @@ DASHBOARD_PORT = int(os.getenv('HTTP_PLATFORM_PORT', os.getenv('PORT', 8080)))  
 # Strategy Configuration
 STRATEGY_TAG = 'S001'  # Tag used for orders in Kite API
 TABLE_PREFIX = 's001'  # Database table prefix for this strategy 
-
 # Azure Blob Storage Configuration for Logs
 # These are read from environment variables in Azure App Service
 # Format: DefaultEndpointsProtocol=https;AccountName=<account_name>;AccountKey=<account_key>;EndpointSuffix=core.windows.net
 AZURE_BLOB_ACCOUNT_NAME = os.getenv('AZURE_BLOB_ACCOUNT_NAME', '')
-AZURE_BLOB_STORAGE_KEY = os.getenv('AzureBlobStorageKey', '')  # Note: Azure App Service uses this name
+# Azure App Service uses 'AzureBlobStorageKey' (not 'AZURE_BLOB_STORAGE_KEY')
+AZURE_BLOB_STORAGE_KEY = os.getenv('AzureBlobStorageKey', '') or os.getenv('AZURE_BLOB_STORAGE_KEY', '')
 AZURE_BLOB_CONTAINER_NAME = os.getenv('AZURE_BLOB_CONTAINER_NAME', '')
 AZURE_BLOB_LOGGING_ENABLED_RAW = os.getenv('AZURE_BLOB_LOGGING_ENABLED', 'False')
-AZURE_BLOB_LOGGING_ENABLED = AZURE_BLOB_LOGGING_ENABLED_RAW.lower() == 'true'
+# Accept multiple formats: 'true', 'yes', '1', 'on' (case-insensitive)
+AZURE_BLOB_LOGGING_ENABLED_RAW_LOWER = AZURE_BLOB_LOGGING_ENABLED_RAW.lower().strip()
+AZURE_BLOB_LOGGING_ENABLED = AZURE_BLOB_LOGGING_ENABLED_RAW_LOWER in ('true', 'yes', '1', 'on')
 
 # Print diagnostic info at startup (helps with troubleshooting)
 if is_azure_environment():
@@ -165,3 +167,7 @@ if AZURE_BLOB_ACCOUNT_NAME and AZURE_BLOB_STORAGE_KEY:
 else:
     AZURE_BLOB_CONNECTION_STRING = None
 
+{
+    # DATABASE_URL=postgresql://shivams:Itsme123@postgresql-206372-0.cloudclusters.net:10073/tradingpro
+    "database_url": "postgresql://shivams:Itsme123@postgresql-206372-0.cloudclusters.net:10073/tradingpro"
+}

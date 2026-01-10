@@ -40,6 +40,8 @@ data/greeks_*.json
 
 # Local config (if sensitive)
 config_local.py
+config/config.json
+config/config.json
 
 # Build artifacts
 dist/

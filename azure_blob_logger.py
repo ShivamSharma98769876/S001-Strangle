@@ -23,10 +23,10 @@ import traceback
 # ============================================================================
 
 # Option 1: Use Connection String (Recommended - easiest to use)
-CONNECTION_STRING = "DefaultEndpointsProtocol=https;AccountName=s0001s0001;AccountKey=o1t4swp/blCqs68G8ibe3J2p17FBf5FIGTRqr2iFeif/KsZXPNShmyVMZuBKbFtzU2csyjmPXhhF+AStCPP2xA==;EndpointSuffix=core.windows.net"
+CONNECTION_STRING = "DefaultEndpointsProtocol=https;AccountName=s0001;AccountKey=o1t4swp/blCqs68G8ibe3J2p17FBf5FIGTRqr2iFeif/KsZXPNShmyVMZuBKbFtzU2csyjmPXhhF+AStCPP2xA==;EndpointSuffix=core.windows.net"
 
 # Option 2: Use individual credentials (Alternative method)
-STORAGE_ACCOUNT_NAME = "s0001s0001"
+STORAGE_ACCOUNT_NAME = "s0001"
 STORAGE_ACCOUNT_KEY = "o1t4swp/blCqs68G8ibe3J2p17FBf5FIGTRqr2iFeif/KsZXPNShmyVMZuBKbFtzU2csyjmPXhhF+AStCPP2xA=="
 CONTAINER_NAME = "str-container1"
 
