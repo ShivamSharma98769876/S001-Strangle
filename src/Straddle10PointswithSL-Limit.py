@@ -2667,7 +2667,6 @@ def main():
         logging.warning("[P&L RECORDER] Not available - P&L recording will be disabled")
     
     # Setup logging for both local and Azure environments
-    import os
     try:
         # Print diagnostic message before setting up logging (helps identify strategy start in log stream)
         print(f"[STRATEGY] Starting logging setup for account: {Input_account}")

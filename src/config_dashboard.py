@@ -2028,11 +2028,16 @@ def start_live_trader():
         # 5. Call Quantity (line 2504)
         # 6. Put Quantity (line 2505)
         
+        # CRITICAL: Get broker_id from session BEFORE starting thread (while still in Flask request context)
+        broker_id = SaaSSessionManager.get_broker_id()
+        if not broker_id:
+            broker_id = account  # Fallback to account if broker_id not available
+        
         # Use a threading event to signal when process is created
         process_ready = threading.Event()
         process_error = [None]  # Use list to allow modification from inner function
         
-        def run_strategy():
+        def run_strategy(broker_id_param):
             global strategy_process, strategy_running, strategy_output_buffer
             try:
                 strategy_running = True
@@ -2042,10 +2047,8 @@ def start_live_trader():
                     strategy_output_buffer = []
                     logging.info(f"[LIVE TRADER] Cleared output buffer for new strategy run")
                 
-                # Get broker_id from session for multi-user isolation
-                broker_id = SaaSSessionManager.get_broker_id()
-                if not broker_id:
-                    broker_id = account  # Fallback to account if broker_id not available
+                # Use the broker_id passed as parameter (captured before thread started)
+                broker_id = broker_id_param
                 
                 # Store the broker_id used for this strategy run (for log retrieval)
                 global strategy_account_name
@@ -2178,7 +2181,8 @@ def start_live_trader():
                 strategy_process = None
                 process_ready.set()  # Signal even on error so main thread can check
         
-        strategy_thread = threading.Thread(target=run_strategy, daemon=True)
+        # Pass broker_id as argument to the thread function
+        strategy_thread = threading.Thread(target=run_strategy, args=(broker_id,), daemon=True)
         strategy_thread.start()
         
         # Wait for process to be created (with timeout)
