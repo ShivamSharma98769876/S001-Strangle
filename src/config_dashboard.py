@@ -525,6 +525,15 @@ def favicon():
     from flask import Response
     return Response('', mimetype='image/x-icon')
 
+@app.route('/health')
+def health_check():
+    """Health check endpoint for Azure App Service startup probe"""
+    return jsonify({
+        'status': 'healthy',
+        'service': 'trading-bot-dashboard',
+        'timestamp': datetime.now().isoformat()
+    }), 200
+
 @app.route('/')
 def dashboard():
     """Main dashboard page - Zero Touch Strangle landing page"""
@@ -1505,41 +1514,32 @@ def get_live_trader_logs():
         # Try to find log files
         log_files = []
         
-        # Get broker_id from session (SaaS-compliant multi-user isolation)
+        # CRITICAL: Get broker_id from session (SaaS-compliant multi-user isolation)
+        # MUST use broker_id only - no fallback to account name for security
         broker_id = SaaSSessionManager.get_broker_id()
         
-        # Fallback to account name if broker_id not available (backward compatibility)
-        global account_holder_name, strategy_account_name
-        account = None
+        if not broker_id:
+            # If no broker_id, user is not properly authenticated - return error
+            logging.error("[LOGS] No broker_id found in session - user not authenticated")
+            return jsonify({
+                'success': False,
+                'error': 'User not authenticated. Please log in again.',
+                'logs': ['[ERROR] Authentication required. Please log in to view logs.'],
+                'log_file_path': None,
+                'log_files_found': 0
+            }), 401
         
-        if broker_id:
-            # Use broker_id for log file matching (multi-user isolation)
-            account = broker_id
-            logging.info(f"[LOGS] Using broker_id from session for log matching: {account}")
-        # Priority 1: Use account name from strategy start (most accurate for log matching)
-        elif strategy_account_name:
-            account = strategy_account_name
-            logging.info(f"[LOGS] Using strategy account name for log matching: {account}")
-        # Priority 2: Use account holder name from profile
-        elif account_holder_name:
-            account = account_holder_name
-            logging.info(f"[LOGS] Using account holder name for log matching: {account}")
-        # Priority 3: Use account from kite client
-        elif kite_client_global and hasattr(kite_client_global, 'account'):
-            account = kite_client_global.account or 'TRADING_ACCOUNT'
-            logging.info(f"[LOGS] Using kite client account for log matching: {account}")
-        else:
-            account = 'TRADING_ACCOUNT'
-            logging.info(f"[LOGS] Using default account name for log matching: {account}")
+        # Use broker_id for log file matching (multi-user isolation)
+        # broker_id is the Zerodha ID and is the primary identifier
+        account = broker_id
+        logging.info(f"[LOGS] [broker_id: {broker_id}] Using broker_id from session for log matching (Zerodha ID)")
         
-        # Simplify: Only look for today's log file in format: {account}_{YYYYMONDD}.log
-        # Get sanitized account name (first name only)
-        if not account:
-            logging.warning(f"[LOGS] No account name available, cannot find log file")
-        else:
+        # Simplify: Only look for today's log file in format: {broker_id}_{YYYYMONDD}.log
+        # Get sanitized broker_id (first name only)
+        if account:
             sanitized_account = sanitize_account_name_for_filename(account)
             log_filename = f'{sanitized_account}_{today_formatted}.log'
-            logging.info(f"[LOGS] Looking for today's log file: '{log_filename}' for account: '{account}' (sanitized: '{sanitized_account}')")
+            logging.info(f"[LOGS] [broker_id: {broker_id}] Looking for today's log file: '{log_filename}' (sanitized: '{sanitized_account}')")
             
             # LOCAL ENVIRONMENT: Check src/logs directory
             if not is_azure_environment():
@@ -1615,7 +1615,7 @@ def get_live_trader_logs():
         
         # THEN: Check log files (as fallback/persistent storage)
         if not log_files:
-            logging.warning(f"[LOGS] No log files found for account: {account}, date: {today}")
+            logging.warning(f"[LOGS] [broker_id: {broker_id}] No log files found for broker_id: {broker_id}, date: {today}")
             # Log checked directories based on environment
             if is_azure_environment():
                 # For error message, try to get account-specific directory
@@ -2042,13 +2042,19 @@ def start_live_trader():
                     strategy_output_buffer = []
                     logging.info(f"[LIVE TRADER] Cleared output buffer for new strategy run")
                 
-                # Store the account name used for this strategy run (for log retrieval)
+                # Get broker_id from session for multi-user isolation
+                broker_id = SaaSSessionManager.get_broker_id()
+                if not broker_id:
+                    broker_id = account  # Fallback to account if broker_id not available
+                
+                # Store the broker_id used for this strategy run (for log retrieval)
                 global strategy_account_name
-                strategy_account_name = account
-                logging.info(f"[LIVE TRADER] Starting strategy with account name: {account} (will be used for log file matching)")
+                strategy_account_name = broker_id  # Use broker_id for log file matching
+                logging.info(f"[LIVE TRADER] Starting strategy with broker_id: {broker_id} (Zerodha ID - will be used for log file matching)")
                 
                 # Prepare input string for stdin (matching the exact order of input() calls)
-                inputs = f"{account}\n{api_key}\n{api_secret}\n{access_token}\n{call_quantity}\n{put_quantity}\n"
+                # Use broker_id as account identifier for consistency
+                inputs = f"{broker_id}\n{api_key}\n{api_secret}\n{access_token}\n{call_quantity}\n{put_quantity}\n"
                 
                 # Run the strategy file
                 # Use the directory containing the strategy file as working directory
@@ -2067,6 +2073,10 @@ def start_live_trader():
                     env = os.environ.copy()
                     # Add PYTHONUNBUFFERED to ensure real-time output
                     env['PYTHONUNBUFFERED'] = '1'
+                    # Add broker_id to environment for strategy file to use
+                    if broker_id:
+                        env['BROKER_ID'] = broker_id
+                        env['ZERODHA_ID'] = broker_id  # Alias for clarity
                     strategy_process = subprocess.Popen(
                         [sys.executable, '-u', strategy_file],  # -u flag for unbuffered output
                         stdin=subprocess.PIPE,
@@ -3028,9 +3038,6 @@ def initialize_dashboard():
 def start_dashboard(host=None, port=None, debug=False):
     """Start the config dashboard web server"""
     try:
-        # Initialize dashboard (try to reconnect)
-        initialize_dashboard()
-        
         # Use config values if not provided
         if host is None:
             host = DASHBOARD_HOST
@@ -3045,9 +3052,22 @@ def start_dashboard(host=None, port=None, debug=False):
         print(f"[CONFIG DASHBOARD] Configuration loaded from: src/config.py")
         print("=" * 60)
         
-        # Log startup info
-        logging.info(f"[DASHBOARD] Starting Flask app on {host}:{port}")
+        # Log startup info with broker_id context if available
+        try:
+            broker_id = SaaSSessionManager.get_broker_id()
+            if broker_id:
+                logging.info(f"[DASHBOARD] Starting Flask app on {host}:{port} (broker_id: {broker_id})")
+            else:
+                logging.info(f"[DASHBOARD] Starting Flask app on {host}:{port}")
+        except:
+            logging.info(f"[DASHBOARD] Starting Flask app on {host}:{port}")
         logging.info(f"[DASHBOARD] Dashboard will be available at http://{host}:{port}")
+        
+        # Initialize dashboard in background thread (non-blocking for Azure startup probe)
+        # This allows the health check endpoint to respond immediately
+        init_thread = threading.Thread(target=initialize_dashboard, daemon=True)
+        init_thread.start()
+        logging.info("[DASHBOARD] Dashboard initialization started in background thread")
         
         # Run Flask app (blocking call)
         app.run(host=host, port=port, debug=debug, use_reloader=False)

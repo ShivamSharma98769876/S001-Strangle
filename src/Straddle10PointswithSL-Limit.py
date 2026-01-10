@@ -2030,9 +2030,11 @@ def monitor_trades(call_order_id, put_order_id, call_strike, put_strike, call_sl
             # Save P&L before market close
             try:
                 if PnLRecorder is not None:
-                    pnl_recorder = PnLRecorder(account=account)
-                    pnl_recorder.save_daily_pnl(kite, account)
-                    logging.info("[MARKET CLOSE] Daily P&L saved successfully")
+                    # Get broker_id from environment variable (set by dashboard) or use account
+                    broker_id = os.getenv('BROKER_ID') or os.getenv('ZERODHA_ID') or account
+                    pnl_recorder = PnLRecorder(broker_id=broker_id, account=account)
+                    pnl_recorder.save_daily_pnl(kite, broker_id=broker_id)
+                    logging.info(f"[MARKET CLOSE] Daily P&L saved successfully for broker_id: {broker_id}")
                 else:
                     logging.warning("[MARKET CLOSE] PnLRecorder not available, skipping P&L save")
             except Exception as e:
@@ -2655,10 +2657,12 @@ def main():
     kite = KiteConnect(api_key=api_key)
     kite.set_access_token(request_token)
     
-    # Initialize P&L Recorder (account-wise)
+    # Initialize P&L Recorder (broker_id-wise for multi-user isolation)
+    # Get broker_id from environment variable (set by dashboard) or use account
+    broker_id = os.getenv('BROKER_ID') or os.getenv('ZERODHA_ID') or account
     if PnLRecorder is not None:
-        pnl_recorder = PnLRecorder(account=account)
-        logging.info(f"[P&L RECORDER] Initialized for account '{account}' - will save daily P&L before market close")
+        pnl_recorder = PnLRecorder(broker_id=broker_id, account=account)
+        logging.info(f"[P&L RECORDER] Initialized for broker_id '{broker_id}' (Zerodha ID) - will save daily P&L before market close")
     else:
         logging.warning("[P&L RECORDER] Not available - P&L recording will be disabled")
     
@@ -2822,9 +2826,11 @@ def main():
             # Save P&L before market close (in case no trades were taken)
             try:
                 if PnLRecorder is not None:
-                    pnl_recorder = PnLRecorder(account=account)
-                    pnl_recorder.save_daily_pnl(kite, account)
-                    logging.info("[MARKET CLOSE] Daily P&L saved successfully")
+                    # Get broker_id from environment variable (set by dashboard) or use account
+                    broker_id = os.getenv('BROKER_ID') or os.getenv('ZERODHA_ID') or account
+                    pnl_recorder = PnLRecorder(broker_id=broker_id, account=account)
+                    pnl_recorder.save_daily_pnl(kite, broker_id=broker_id)
+                    logging.info(f"[MARKET CLOSE] Daily P&L saved successfully for broker_id: {broker_id}")
                 else:
                     logging.warning("[MARKET CLOSE] PnLRecorder not available, skipping P&L save")
             except Exception as e:

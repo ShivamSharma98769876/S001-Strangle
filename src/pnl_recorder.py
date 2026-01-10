@@ -13,19 +13,22 @@ from typing import Dict, List, Optional
 class PnLRecorder:
     """Records and manages daily P&L data"""
     
-    def __init__(self, data_dir: str = "pnl_data", account: Optional[str] = None):
+    def __init__(self, data_dir: str = "pnl_data", broker_id: Optional[str] = None, account: Optional[str] = None):
         """
         Initialize P&L Recorder
         
         Args:
             data_dir: Directory to store P&L data files
-            account: Account identifier for account-wise file storage
+            broker_id: Zerodha ID (broker_id) - primary identifier for multi-user isolation
+            account: Account identifier (deprecated, use broker_id instead)
         """
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(exist_ok=True)
-        self.account = account or 'default'
-        # Sanitize account name for filename (remove special characters)
-        self.safe_account = self._sanitize_account_name(self.account)
+        # Use broker_id as primary identifier, fallback to account for backward compatibility
+        self.broker_id = broker_id or account or 'default'
+        self.account = self.broker_id  # Keep account for backward compatibility
+        # Sanitize broker_id for filename (remove special characters)
+        self.safe_account = self._sanitize_account_name(self.broker_id)
         self.json_file = self.data_dir / f"daily_pnl_{self.safe_account}.json"
         self.csv_file = self.data_dir / f"daily_pnl_{self.safe_account}.csv"
     
@@ -123,20 +126,22 @@ class PnLRecorder:
                 'error': str(e)
             }
     
-    def save_daily_pnl(self, kite, account: Optional[str] = None) -> bool:
+    def save_daily_pnl(self, kite, broker_id: Optional[str] = None, account: Optional[str] = None) -> bool:
         """
-        Save today's P&L data to JSON and CSV files (account-wise)
+        Save today's P&L data to JSON and CSV files (broker_id-wise)
         
         Args:
             kite: KiteConnect instance
-            account: Account identifier (optional, uses instance account if not provided)
+            broker_id: Zerodha ID (broker_id) - primary identifier (preferred)
+            account: Account identifier (deprecated, use broker_id instead)
             
         Returns:
             True if saved successfully, False otherwise
         """
         try:
-            # Use provided account or instance account
-            record_account = account or self.account
+            # Use provided broker_id, then account (for backward compatibility), then instance broker_id
+            record_broker_id = broker_id or account or self.broker_id
+            record_account = record_broker_id  # Use broker_id as account identifier
             
             # Get P&L data
             pnl_data = self.get_non_equity_pnl(kite)
@@ -148,7 +153,8 @@ class PnLRecorder:
             daily_record = {
                 'date': today.isoformat(),
                 'timestamp': timestamp.isoformat(),
-                'account': record_account,
+                'broker_id': record_broker_id,  # Primary identifier
+                'account': record_account,  # Keep for backward compatibility
                 'non_equity_pnl': pnl_data['non_equity_pnl'],
                 'total_pnl': pnl_data['total_pnl'],
                 'equity_pnl': pnl_data['equity_pnl'],
@@ -162,7 +168,7 @@ class PnLRecorder:
             # Save to CSV
             self._save_to_csv(daily_record)
             
-            logging.info(f"[P&L RECORD] Saved daily P&L for account '{record_account}': "
+            logging.info(f"[P&L RECORD] Saved daily P&L for broker_id '{record_broker_id}': "
                        f"Non-Equity: ₹{pnl_data['non_equity_pnl']:.2f}, "
                        f"Total: ₹{pnl_data['total_pnl']:.2f}, Positions: {pnl_data['positions_count']}")
             logging.info(f"[P&L RECORD] Saved to JSON: {self.json_file}")
@@ -258,14 +264,15 @@ class PnLRecorder:
             raise
     
     def get_historical_pnl(self, start_date: Optional[date] = None, end_date: Optional[date] = None, 
-                           account: Optional[str] = None) -> List[Dict]:
+                           broker_id: Optional[str] = None, account: Optional[str] = None) -> List[Dict]:
         """
-        Get historical P&L records for this account
+        Get historical P&L records for this broker_id
         
         Args:
             start_date: Start date filter (optional)
             end_date: End date filter (optional)
-            account: Account filter (optional, uses instance account if not provided)
+            broker_id: Zerodha ID filter (preferred, uses instance broker_id if not provided)
+            account: Account filter (deprecated, use broker_id instead)
             
         Returns:
             List of P&L records
@@ -278,10 +285,11 @@ class PnLRecorder:
                 data = json.load(f)
             
             records = data.get('records', [])
-            filter_account = account or self.account
+            # Use broker_id if provided, then account (for backward compatibility), then instance broker_id
+            filter_broker_id = broker_id or account or self.broker_id
             
-            # Filter by account
-            records = [r for r in records if r.get('account') == filter_account]
+            # Filter by broker_id (preferred) or account (backward compatibility)
+            records = [r for r in records if (r.get('broker_id') == filter_broker_id or r.get('account') == filter_broker_id)]
             
             # Filter by date range if provided
             if start_date or end_date:
