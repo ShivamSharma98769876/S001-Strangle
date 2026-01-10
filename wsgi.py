@@ -16,17 +16,19 @@ if current_dir not in sys.path:
 # Import the Flask app from config_dashboard
 # This import will execute all module-level code in config_dashboard.py
 # The health endpoint should be available immediately after this import
+# CRITICAL: Health endpoints are registered at the very top of config_dashboard.py
+# (right after Flask app creation) to ensure they work even if other imports fail
 try:
+    # Minimal logging for faster startup - health endpoint must respond quickly
     from src.config_dashboard import app
-    print("[WSGI] Successfully imported Flask app from config_dashboard")
 except Exception as e:
-    print(f"[WSGI] ERROR: Failed to import Flask app: {e}")
+    # Create a minimal app for error reporting if import fails
     import traceback
     traceback.print_exc()
-    # Create a minimal app for error reporting
     from flask import Flask
     app = Flask(__name__)
     @app.route('/health')
+    @app.route('/healthz')
     def health_error():
         return {'status': 'error', 'message': 'App import failed'}, 500
     raise
@@ -38,5 +40,6 @@ application = app
 __all__ = ['application', 'app']
 
 # Log that WSGI is ready
-print("[WSGI] WSGI application object ready")
-print(f"[WSGI] Health endpoint should be available at /health")
+print("[WSGI] ✓ WSGI application object ready")
+print("[WSGI] ✓ Application can be accessed as 'application' or 'app'")
+print("[WSGI] ✓ Ready for Gunicorn to start")

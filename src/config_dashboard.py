@@ -91,6 +91,20 @@ app = Flask(__name__,
             static_url_path='/static',
             template_folder=template_folder)
 
+# CRITICAL: Register health endpoint IMMEDIATELY after app creation
+# This must be done before any other operations to ensure Azure startup probe works
+# These endpoints must respond in < 1 second to pass Azure startup probe
+@app.route('/health')
+@app.route('/healthz')
+def health_check_early():
+    """Health check endpoint for Azure App Service startup probe - must respond immediately"""
+    # Return immediately - minimal response for fastest startup probe success
+    # Flask will automatically convert dict to JSON response
+    return {'status': 'healthy', 'service': 'trading-bot-dashboard'}, 200
+
+# Note: Root route '/' will be defined later for the dashboard
+# Health endpoints above are registered first to ensure they work immediately
+
 # Initialize basic logging early (before environment detection)
 # Full logging setup with file handler will be done later
 logging.basicConfig(
@@ -525,26 +539,8 @@ def favicon():
     from flask import Response
     return Response('', mimetype='image/x-icon')
 
-@app.route('/health')
-@app.route('/healthz')
-def health_check():
-    """Health check endpoint for Azure App Service startup probe - must respond immediately"""
-    try:
-        # Return immediately without any dependencies
-        # This endpoint is critical for Azure startup probe
-        return jsonify({
-            'status': 'healthy',
-            'service': 'trading-bot-dashboard',
-            'timestamp': datetime.now().isoformat()
-        }), 200
-    except Exception as e:
-        # Even if there's an error, return 200 to indicate app is running
-        # This prevents startup probe failures
-        return jsonify({
-            'status': 'healthy',
-            'service': 'trading-bot-dashboard',
-            'note': 'Health check responded with minimal dependencies'
-        }), 200
+# Health endpoint is already registered at the top of the file (line ~95)
+# This ensures it's available immediately when the app is imported
 
 @app.route('/')
 def dashboard():
