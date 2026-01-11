@@ -693,40 +693,40 @@
                                 <tr>
                                     <td class="option-label">Call</td>
                                     <td class="lot-size-cell">
-                                        <input type="number" id="callLotSize" readonly value="75" class="lot-size-input">
+                                        <input type="number" id="callLotSize" readonly value="" class="lot-size-input" placeholder="Loading...">
                                     </td>
                                     <td class="lot-quantity-cell">
                                         <input type="number" id="callLots" name="callLots" placeholder="Enter lots" min="1" value="1" step="1" required class="lot-quantity-input">
                                     </td>
                                     <td class="total-quantity-cell">
-                                        <span id="callQuantityDisplay" class="total-quantity-value">75</span>
-                                        <input type="hidden" id="callQuantityHidden" value="75">
+                                        <span id="callQuantityDisplay" class="total-quantity-value">0</span>
+                                        <input type="hidden" id="callQuantityHidden" value="0">
                                     </td>
                                 </tr>
                                 <tr>
                                     <td class="option-label">Put</td>
                                     <td class="lot-size-cell">
-                                        <input type="number" id="putLotSize" readonly value="75" class="lot-size-input">
+                                        <input type="number" id="putLotSize" readonly value="" class="lot-size-input" placeholder="Loading...">
                                     </td>
                                     <td class="lot-quantity-cell">
                                         <input type="number" id="putLots" name="putLots" placeholder="Enter lots" min="1" value="1" step="1" required class="lot-quantity-input">
                                     </td>
                                     <td class="total-quantity-cell">
-                                        <span id="putQuantityDisplay" class="total-quantity-value">75</span>
-                                        <input type="hidden" id="putQuantityHidden" value="75">
+                                        <span id="putQuantityDisplay" class="total-quantity-value">0</span>
+                                        <input type="hidden" id="putQuantityHidden" value="0">
                                     </td>
                                 </tr>
                             </tbody>
                         </table>
                         <!-- Hidden elements for formula display (kept for JS compatibility) -->
                         <div style="display: none;">
-                            <span id="callLotSizeDisplay">75</span>
+                            <span id="callLotSizeDisplay">0</span>
                             <span id="callLotsDisplay">1</span>
-                            <span id="callQuantityResult">75</span>
+                            <span id="callQuantityResult">0</span>
                             <div id="callQuantityFormula"></div>
-                            <span id="putLotSizeDisplay">75</span>
+                            <span id="putLotSizeDisplay">0</span>
                             <span id="putLotsDisplay">1</span>
-                            <span id="putQuantityResult">75</span>
+                            <span id="putQuantityResult">0</span>
                             <div id="putQuantityFormula"></div>
                         </div>
                     </div>
@@ -1028,8 +1028,36 @@
             }
         }
 
+        // Check authentication before allowing access
+        async function checkAuthentication() {
+            try {
+                const response = await fetch('/api/auth/status');
+                const data = await response.json();
+                
+                // CRITICAL: Only allow access if authenticated with access token
+                const isAuthenticated = data.authenticated === true && data.has_access_token === true;
+                
+                if (!isAuthenticated) {
+                    // Show error message and redirect to main dashboard for authentication
+                    alert('Please authenticate first before accessing Live Trader');
+                    window.location.href = '/';
+                    return false;
+                }
+                return true;
+            } catch (error) {
+                console.error('[AUTH] Error checking authentication:', error);
+                alert('Unable to verify authentication. Please try again.');
+                window.location.href = '/';
+                return false;
+            }
+        }
+
         // Initialize page
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', async function() {
+            // Check authentication first - redirect if not authenticated
+            const isAuth = await checkAuthentication();
+            if (!isAuth) return;
+            
             fetchLotSize(); // Fetch lot size first
             checkStatus();
             loadLogs();
@@ -1400,7 +1428,8 @@
                     method: 'POST'
                 }, 15000); // 15 second timeout for stop operation
 
-                if (data.status === 'success') {
+                // Check for success - handle both response formats (success: true or status: 'success')
+                if (data.success === true || data.status === 'success') {
                     isRunning = false;
                     // Re-enable start button
                     startBtn.disabled = false;
@@ -1412,14 +1441,14 @@
                     stopBtn.style.cursor = 'not-allowed';
                     stopBtn.innerHTML = '<i class="fas fa-stop"></i> Stop Live Trader';
                     checkStatus(); // Refresh status to ensure UI is in sync
-                    addLog('warning', 'Live Trader stopped');
+                    addLog('warning', 'Live Trader stopped successfully');
                 } else {
                     // Re-enable stop button on error
                     stopBtn.disabled = false;
                     stopBtn.style.opacity = '1';
                     stopBtn.style.cursor = 'pointer';
                     stopBtn.innerHTML = '<i class="fas fa-stop"></i> Stop Live Trader';
-                    addLog('error', 'Error stopping Live Trader: ' + (data.message || 'Unknown error'));
+                    addLog('error', 'Error stopping Live Trader: ' + (data.error || data.message || 'Unknown error'));
                     // Check actual status to ensure UI is correct
                     checkStatus();
                 }
@@ -1672,6 +1701,33 @@
             }
         }
 
+        // Helper function to format time in IST
+        function formatTimeIST(date) {
+            if (!date) date = new Date();
+            return date.toLocaleTimeString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: true
+            });
+        }
+
+        // Helper function to format datetime in IST
+        function formatDateTimeIST(date) {
+            if (!date) date = new Date();
+            return date.toLocaleString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+            });
+        }
+
         function parseLogEntry(logText) {
             const entry = document.createElement('div');
             entry.className = 'log-entry';
@@ -1681,9 +1737,11 @@
             let logMessage = logText;
             
             // Try to parse timestamp from log format: "2025-12-09 10:32:00,048 - INFO - ..."
-            const timestampMatch = logText.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})/);
+            const timestampMatch = logText.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),?\d*/);
             if (timestampMatch) {
-                timestamp = timestampMatch[1].replace(',', '.');
+                // Parse the timestamp and convert to IST format
+                const logDate = new Date(timestampMatch[1].replace(' ', 'T') + '+05:30'); // Assume server logs are already in IST
+                timestamp = formatTimeIST(logDate);
                 // Extract the actual log message (everything after timestamp and level)
                 const messageMatch = logText.match(/^.*? - \w+ - (.*)$/);
                 if (messageMatch) {
@@ -1693,8 +1751,8 @@
                     logMessage = logText;
                 }
             } else {
-                // Fallback to current time if no timestamp in log
-                timestamp = new Date().toLocaleTimeString();
+                // Fallback to current IST time if no timestamp in log
+                timestamp = formatTimeIST(new Date());
             }
             
             const timestampSpan = document.createElement('span');
