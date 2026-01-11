@@ -169,6 +169,8 @@ function switchAuthTab(tab) {
         accessTokenForm.style.display = 'none';
     }
 }
+// Make it globally available for inline onclick handlers
+window.switchAuthTab = switchAuthTab;
 
 // Authenticate with access token
 async function authenticateWithAccessToken(event) {
@@ -250,7 +252,27 @@ async function authenticateWithRequestToken(event) {
             })
         });
         
-        const data = await response.json();
+        // Handle non-JSON responses (like 401 errors)
+        let data;
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+            try {
+                data = await response.json();
+            } catch (jsonError) {
+                const text = await response.text();
+                throw new Error(text || `Server returned ${response.status} ${response.statusText}`);
+            }
+        } else {
+            const text = await response.text();
+            throw new Error(text || `Server returned ${response.status} ${response.statusText}`);
+        }
+        
+        if (!response.ok) {
+            errorDiv.textContent = data.error || data.message || `Server returned ${response.status} ${response.statusText}`;
+            errorDiv.style.display = 'block';
+            return;
+        }
+        
         if (data.success && data.access_token) {
             generatedAccessToken.value = data.access_token;
             accessTokenDisplay.style.display = 'block';
@@ -262,7 +284,7 @@ async function authenticateWithRequestToken(event) {
                 addNotification('Access token generated and saved', 'success');
             }
         } else {
-            errorDiv.textContent = data.message || 'Failed to generate access token';
+            errorDiv.textContent = data.message || data.error || 'Failed to generate access token';
             errorDiv.style.display = 'block';
         }
     } catch (error) {
@@ -465,8 +487,32 @@ async function updateTrades() {
             return;
         }
         
-        const data = await response.json();
-        if (data.success && data.trades) {
+        // Safely parse JSON response
+        let data;
+        try {
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                data = await response.json();
+            } else {
+                const text = await response.text();
+                console.warn('Non-JSON response from trade-history:', text);
+                return;
+            }
+        } catch (jsonError) {
+            console.error('Error parsing JSON response:', jsonError);
+            if (response.status === 401) {
+                isAuthenticated = false;
+                updateAuthUI(false);
+                stopUpdates();
+            }
+            return;
+        }
+        
+        if (data.status === 'success' && data.trades) {
+            renderTrades(data.trades);
+            updateTradeSummary(data.trades);
+        } else if (data.success && data.trades) {
+            // Handle alternative response format
             renderTrades(data.trades);
             updateTradeSummary(data.trades);
         }
@@ -697,6 +743,8 @@ function toggleAuthDetails() {
         }
     }
 }
+// Make it globally available for inline onclick handlers
+window.toggleAuthDetails = toggleAuthDetails;
 
 // Update auth details
 async function updateAuthDetails() {
@@ -1132,12 +1180,15 @@ function initializePnlCalendar() {
     if (pnlType) {
         pnlType.addEventListener('change', () => {
             updatePnlFilters();
-            loadPnlCalendarData();
+            // Only load data if authenticated
+            if (isAuthenticated) {
+                loadPnlCalendarData();
+            }
         });
     }
     
-    // Load initial data
-    loadPnlCalendarData();
+    // Don't load initial data here - wait for authentication
+    // loadPnlCalendarData() will be called after authentication check
 }
 
 function updatePnlFilters() {
@@ -1183,6 +1234,7 @@ function openDateRangePicker() {
         renderCalendars();
     }
 }
+window.openDateRangePicker = openDateRangePicker;
 
 function closeDateRangePicker() {
     const modal = document.getElementById('dateRangePickerModal');
@@ -1190,6 +1242,7 @@ function closeDateRangePicker() {
         modal.style.display = 'none';
     }
 }
+window.closeDateRangePicker = closeDateRangePicker;
 
 function setQuickDateRange(option) {
     const today = new Date();
@@ -1238,6 +1291,7 @@ function setQuickDateRange(option) {
     updateDateRangeDisplay();
     renderCalendars();
 }
+window.setQuickDateRange = setQuickDateRange;
 
 function changeMonth(calendar, months) {
     if (calendar === 'from') {
@@ -1247,6 +1301,7 @@ function changeMonth(calendar, months) {
     }
     renderCalendars();
 }
+window.changeMonth = changeMonth;
 
 function renderCalendars() {
     renderCalendar('from', dateRangePickerState.fromMonth, dateRangePickerState.fromDate);
@@ -1324,12 +1379,16 @@ function selectDate(type, year, month, day) {
     }
     renderCalendars();
 }
+// Make it globally available for inline onclick handlers
+window.selectDate = selectDate;
 
 function applyDateRange() {
     updateDateRangeDisplay();
     closeDateRangePicker();
     loadPnlCalendarData();
 }
+// Make it globally available for inline onclick handlers
+window.applyDateRange = applyDateRange;
 
 function updatePnlFilters() {
     const segmentEl = document.getElementById('pnlSegment');
@@ -1373,141 +1432,6 @@ function openDateRangePicker() {
         modal.style.display = 'flex';
         renderCalendars();
     }
-}
-
-function closeDateRangePicker() {
-    const modal = document.getElementById('dateRangePickerModal');
-    if (modal) {
-        modal.style.display = 'none';
-    }
-}
-
-function setQuickDateRange(option) {
-    const today = new Date();
-    let fromDate, toDate;
-    
-    switch(option) {
-        case 'last7':
-            fromDate = new Date(today);
-            fromDate.setDate(today.getDate() - 6);
-            toDate = new Date(today);
-            break;
-        case 'last30':
-            fromDate = new Date(today);
-            fromDate.setDate(today.getDate() - 29);
-            toDate = new Date(today);
-            break;
-        case 'prevFY':
-            const currentYear = today.getFullYear();
-            const currentMonth = today.getMonth();
-            if (currentMonth >= 3) {
-                fromDate = new Date(currentYear - 1, 3, 1);
-                toDate = new Date(currentYear, 2, 31);
-            } else {
-                fromDate = new Date(currentYear - 2, 3, 1);
-                toDate = new Date(currentYear - 1, 2, 31);
-            }
-            break;
-        case 'currentFY':
-            const currYear = today.getFullYear();
-            const currMonth = today.getMonth();
-            if (currMonth >= 3) {
-                fromDate = new Date(currYear, 3, 1);
-                toDate = new Date(today);
-            } else {
-                fromDate = new Date(currYear - 1, 3, 1);
-                toDate = new Date(today);
-            }
-            break;
-    }
-    
-    dateRangePickerState.fromDate = fromDate;
-    dateRangePickerState.toDate = toDate;
-    dateRangePickerState.fromMonth = new Date(fromDate);
-    dateRangePickerState.toMonth = new Date(toDate);
-    
-    updateDateRangeDisplay();
-    renderCalendars();
-}
-
-function changeMonth(calendar, months) {
-    if (calendar === 'from') {
-        dateRangePickerState.fromMonth.setMonth(dateRangePickerState.fromMonth.getMonth() + months);
-    } else {
-        dateRangePickerState.toMonth.setMonth(dateRangePickerState.toMonth.getMonth() + months);
-    }
-    renderCalendars();
-}
-
-function renderCalendars() {
-    renderCalendar('from', dateRangePickerState.fromMonth, dateRangePickerState.fromDate);
-    renderCalendar('to', dateRangePickerState.toMonth, dateRangePickerState.toDate);
-}
-
-function renderCalendar(type, month, selectedDate) {
-    const container = document.getElementById(type + 'Calendar');
-    if (!container) return;
-    
-    const year = month.getFullYear();
-    const monthIndex = month.getMonth();
-    
-    // Update month display
-    const monthDisplay = document.getElementById(type + 'MonthDisplay');
-    if (monthDisplay) {
-        monthDisplay.textContent = new Date(year, monthIndex, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-    }
-    
-    // Get first and last day of month
-    const firstDay = new Date(year, monthIndex, 1);
-    const lastDay = new Date(year, monthIndex + 1, 0);
-    
-    let html = '<div class="calendar-weekdays">';
-    const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    weekdays.forEach(day => {
-        html += `<div class="calendar-weekday">${day}</div>`;
-    });
-    html += '</div><div class="calendar-days">';
-    
-    // Previous month days
-    const startWeekday = firstDay.getDay();
-    const prevMonth = new Date(year, monthIndex - 1, 0);
-    for (let i = startWeekday - 1; i >= 0; i--) {
-        const day = prevMonth.getDate() - i;
-        html += `<div class="calendar-day other-month" onclick="selectDate('${type}', ${year}, ${monthIndex - 1}, ${day})">${day}</div>`;
-    }
-    
-    // Current month days
-    for (let day = 1; day <= lastDay.getDate(); day++) {
-        const date = new Date(year, monthIndex, day);
-        let classes = 'calendar-day';
-        if (selectedDate) {
-            const selected = new Date(selectedDate);
-            selected.setHours(0, 0, 0, 0);
-            const compareDate = new Date(date);
-            compareDate.setHours(0, 0, 0, 0);
-            if (compareDate.getTime() === selected.getTime()) {
-                classes += ' selected';
-            }
-        }
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const compareDate = new Date(date);
-        compareDate.setHours(0, 0, 0, 0);
-        if (compareDate.getTime() === today.getTime()) {
-            classes += ' today';
-        }
-        html += `<div class="${classes}" onclick="selectDate('${type}', ${year}, ${monthIndex}, ${day})">${day}</div>`;
-    }
-    
-    // Next month days
-    const endWeekday = lastDay.getDay();
-    const daysToAdd = 6 - endWeekday;
-    for (let day = 1; day <= daysToAdd; day++) {
-        html += `<div class="calendar-day other-month" onclick="selectDate('${type}', ${year}, ${monthIndex + 1}, ${day})">${day}</div>`;
-    }
-    
-    html += '</div>';
-    container.innerHTML = html;
 }
 
 function selectDate(type, year, month, day) {
@@ -1563,7 +1487,27 @@ async function loadPnlCalendarData() {
                 return;
             }
             
-            const data = await response.json();
+            // Safely parse JSON response
+            let data;
+            try {
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    data = await response.json();
+                } else {
+                    const text = await response.text();
+                    console.warn('Non-JSON response from trade-history:', text);
+                    return;
+                }
+            } catch (jsonError) {
+                console.error('Error parsing JSON response:', jsonError);
+                if (response.status === 401) {
+                    isAuthenticated = false;
+                    updateAuthUI(false);
+                    stopUpdates();
+                }
+                return;
+            }
+            
             if (data.status === 'success' && data.trades) {
                     // Process trades into daily P&L
                     pnlCalendarData = {};
@@ -1595,7 +1539,6 @@ async function loadPnlCalendarData() {
                     // Update summary
                     updateRealisedPnlSummary(totalRealisedPnl, totalPaperPnl, totalLivePnl, totalTrades);
                 }
-            }
         } catch (apiError) {
             console.warn('Could not fetch P&L calendar data from API:', apiError);
             // If it's a 401 error, update auth state
@@ -1811,31 +1754,52 @@ function setupEventListeners() {
 
 // Helper function to safely parse JSON responses
 async function safeJsonResponse(response) {
+    // Read response text once (can only be read once)
+    let responseText = '';
+    try {
+        responseText = await response.text();
+    } catch (e) {
+        console.warn('Could not read response body:', e);
+    }
+    
     // Handle 401 Unauthorized
     if (response.status === 401) {
         isAuthenticated = false;
         updateAuthUI(false);
         stopUpdates();
-        const text = await response.text();
-        try {
-            return JSON.parse(text);
-        } catch {
-            throw new Error('Unauthorized: Please authenticate to continue');
+        
+        // Try to parse error message from response
+        let errorMessage = 'Unauthorized: Please authenticate to continue';
+        if (responseText && responseText.trim()) {
+            try {
+                const json = JSON.parse(responseText);
+                errorMessage = json.error || json.message || errorMessage;
+            } catch {
+                // If not JSON, use the text as error message
+                errorMessage = responseText.trim();
+            }
         }
+        
+        throw new Error(errorMessage);
     }
     
-    const contentType = response.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
-        const text = await response.text();
-        throw new Error(`Server returned ${response.status} ${response.statusText}. Expected JSON but got ${contentType || 'unknown'}`);
+    // Check content type
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+        const errorMsg = responseText || `Server returned ${response.status} ${response.statusText}`;
+        throw new Error(errorMsg);
+    }
+    
+    // Parse JSON response
+    if (!responseText || !responseText.trim()) {
+        throw new Error('Empty response from server');
     }
     
     try {
-        return await response.json();
+        return JSON.parse(responseText);
     } catch (error) {
-        // If JSON parsing fails, it might be an error response
-        const text = await response.text();
-        console.error('Failed to parse JSON response:', text);
+        console.error('Failed to parse JSON response:', error);
+        console.error('Response text:', responseText);
         throw new Error(`Failed to parse response: ${error.message}`);
     }
 }

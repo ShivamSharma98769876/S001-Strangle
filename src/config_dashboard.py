@@ -2797,13 +2797,35 @@ def authenticate():
                 'broker_id': broker_id,
                 'device_id': SaaSSessionManager.get_device_id()
             })
-        except Exception as e:
-            logger.error("[AUTH] Authentication failed: {}".format(str(e)))
-            import traceback
-            logger.error("[AUTH] Traceback: {}".format(traceback.format_exc()))
+        except ValueError as e:
+            # Handle validation errors from KiteClient (e.g., missing API secret, checksum errors)
+            error_msg = str(e)
+            logger.error(f"[AUTH] Validation error: {error_msg}")
             return jsonify({
                 'success': False,
-                'error': f'Authentication failed: {str(e)}'
+                'error': error_msg
+            }), 400
+        except Exception as e:
+            # Handle other exceptions
+            error_msg = str(e)
+            logger.error(f"[AUTH] Authentication failed: {error_msg}")
+            import traceback
+            logger.error(f"[AUTH] Traceback: {traceback.format_exc()}")
+            
+            # Provide user-friendly error message
+            if "checksum" in error_msg.lower():
+                user_error = (
+                    "Invalid checksum error. Please verify:\n"
+                    "1. Your API secret is correct and matches your API key\n"
+                    "2. The request token is valid and not expired\n"
+                    "3. The request token was generated using the same API key"
+                )
+            else:
+                user_error = f"Authentication failed: {error_msg}"
+            
+            return jsonify({
+                'success': False,
+                'error': user_error
             }), 401
         
     except Exception as e:
@@ -2833,28 +2855,44 @@ def generate_access_token():
                 'error': 'API key and secret are required'
             }), 400
         
-        # Use the authenticate endpoint logic
+        # Use the authenticate endpoint logic (matching working implementation)
         try:
             from src.kite_client import KiteClient
         except ImportError:
             from kite_client import KiteClient
         
+        # Create KiteClient without request_token first
         kite_client = KiteClient(
             api_key,
             api_secret,
-            request_token=request_token,
             account='DASHBOARD'
         )
         
-        # Verify authentication
-        is_valid, result = validate_kite_connection(kite_client)
-        if not is_valid:
+        # Explicitly call authenticate method (matches working implementation)
+        try:
+            success = kite_client.authenticate(request_token)
+            if not success:
+                return jsonify({
+                    'success': False,
+                    'error': 'Authentication failed: Could not generate access token'
+                }), 401
+        except Exception as auth_error:
+            logger.error(f"Authentication failed: {auth_error}")
             return jsonify({
                 'success': False,
-                'error': result
+                'error': f'Authentication failed: {str(auth_error)}'
             }), 401
         
-        profile = result
+        # Verify authentication by getting profile
+        try:
+            profile = kite_client.kite.profile()
+        except Exception as e:
+            logger.error(f"Failed to get profile after authentication: {e}")
+            return jsonify({
+                'success': False,
+                'error': f'Authentication verification failed: {str(e)}'
+            }), 401
+        
         user_id = profile.get('user_id') or profile.get('user_name') or api_key
         broker_id = profile.get('user_id') or api_key
         account_name = profile.get('user_name') or profile.get('user_id') or 'Trading Account'
@@ -2876,11 +2914,34 @@ def generate_access_token():
             'access_token': kite_client.access_token,
             'message': 'Access token generated successfully'
         })
-    except Exception as e:
-        logger.error(f"[AUTH] Error generating access token: {e}")
+    except ValueError as e:
+        # Handle validation errors from KiteClient
+        error_msg = str(e)
+        logger.error(f"[AUTH] Validation error generating access token: {error_msg}")
         return jsonify({
             'success': False,
-            'error': f'Failed to generate access token: {str(e)}'
+            'error': error_msg
+        }), 400
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"[AUTH] Error generating access token: {error_msg}")
+        import traceback
+        logger.error(f"[AUTH] Traceback: {traceback.format_exc()}")
+        
+        # Provide user-friendly error message
+        if "checksum" in error_msg.lower():
+            user_error = (
+                "Invalid checksum error. Please verify:\n"
+                "1. Your API secret is correct and matches your API key\n"
+                "2. The request token is valid and not expired\n"
+                "3. The request token was generated using the same API key"
+            )
+        else:
+            user_error = f'Failed to generate access token: {error_msg}'
+        
+        return jsonify({
+            'success': False,
+            'error': user_error
         }), 500
 
 @app.route('/api/auth/set-access-token', methods=['POST'])

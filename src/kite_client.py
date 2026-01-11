@@ -19,11 +19,28 @@ class KiteClient:
         # Initialize Kite Connect
         self.kite = KiteConnect(api_key=api_key)
         
-        # Set access token if provided, otherwise generate from request token
+        # Set access token if provided directly
         if access_token:
+            if not access_token.strip():
+                raise ValueError("Access token cannot be empty")
             self.kite.set_access_token(access_token)
+        # Note: If request_token is provided, use authenticate() method explicitly
+        # This matches the working implementation pattern
         elif request_token:
+            # For backward compatibility, still try to generate automatically
+            # But prefer using authenticate() method explicitly
+            # Validate API secret is provided before attempting token generation
+            if not self.api_secret or not self.api_secret.strip():
+                raise ValueError(
+                    "API secret is required to generate access token from request token. "
+                    "Please provide a valid API secret."
+                )
+            if not request_token.strip():
+                raise ValueError("Request token cannot be empty")
+            
+            # generate_access_token will raise ValueError if it fails
             self.access_token = self.generate_access_token(request_token)
+            # If we get here, access_token was successfully generated
             self.kite.set_access_token(self.access_token)
         
         # VIX caching
@@ -40,17 +57,132 @@ class KiteClient:
             request_token (str): The request token from Kite Connect
             
         Returns:
-            str: Access token or None if generation fails
+            str: Access token
+            
+        Raises:
+            ValueError: If API secret is missing, request token is invalid, or checksum validation fails
         """
+        if not self.api_secret or not self.api_secret.strip():
+            error_msg = "API secret is required but not provided"
+            logging.error(f"Error generating access token: {error_msg}")
+            raise ValueError(error_msg)
+        
+        if not request_token or not request_token.strip():
+            error_msg = "Request token is required but not provided"
+            logging.error(f"Error generating access token: {error_msg}")
+            raise ValueError(error_msg)
+        
         try:
             logging.info("Generating access token from request token...")
+            logging.debug(f"Using API key: {self.api_key[:8]}... (truncated)")
+            logging.debug(f"Request token length: {len(request_token)}")
+            logging.debug(f"API secret length: {len(self.api_secret)}")
+            
             data = self.kite.generate_session(request_token, api_secret=self.api_secret)
             access_token = data["access_token"]
+            self.access_token = access_token
+            self.kite.set_access_token(self.access_token)
             logging.info("Access token generated successfully")
             return access_token
         except Exception as e:
-            logging.error(f"Error generating access token: {e}")
-            return None
+            error_msg = str(e)
+            logging.error(f"Error generating access token: {error_msg}")
+            
+            # Provide more specific error messages
+            if "checksum" in error_msg.lower():
+                detailed_error = (
+                    f"Invalid checksum error. This usually means:\n"
+                    f"1. API secret is incorrect or doesn't match the API key\n"
+                    f"2. Request token is invalid or expired\n"
+                    f"3. Request token was generated with a different API key\n"
+                    f"4. API secret contains extra whitespace or special characters\n"
+                    f"Original error: {error_msg}"
+                )
+                logging.error(detailed_error)
+                raise ValueError(detailed_error) from e
+            elif "invalid" in error_msg.lower() or "expired" in error_msg.lower():
+                detailed_error = (
+                    f"Invalid or expired request token. Please generate a new request token.\n"
+                    f"Original error: {error_msg}"
+                )
+                logging.error(detailed_error)
+                raise ValueError(detailed_error) from e
+            else:
+                # Re-raise the original exception with context
+                raise ValueError(
+                    f"Failed to generate access token: {error_msg}\n"
+                    f"Please verify your API credentials and request token are correct."
+                ) from e
+    
+    def authenticate(self, request_token):
+        """
+        Authenticate with Zerodha using request token (matches working implementation)
+        This method explicitly handles authentication and is preferred over auto-generation in __init__
+        
+        Args:
+            request_token (str): The request token from Kite Connect
+            
+        Returns:
+            bool: True if authentication successful, False otherwise
+            
+        Raises:
+            ValueError: If API secret is missing, request token is invalid, or checksum validation fails
+        """
+        if not self.api_secret or not self.api_secret.strip():
+            error_msg = "API secret is required but not provided"
+            logging.error(f"Authentication failed: {error_msg}")
+            raise ValueError(error_msg)
+        
+        if not request_token or not request_token.strip():
+            error_msg = "Request token is required but not provided"
+            logging.error(f"Authentication failed: {error_msg}")
+            raise ValueError(error_msg)
+        
+        try:
+            if not self.kite:
+                self.kite = KiteConnect(api_key=self.api_key)
+            
+            logging.info("Authenticating with Zerodha using request token...")
+            logging.debug(f"Using API key: {self.api_key[:8]}... (truncated)")
+            logging.debug(f"Request token length: {len(request_token)}")
+            logging.debug(f"API secret length: {len(self.api_secret)}")
+            
+            data = self.kite.generate_session(request_token, api_secret=self.api_secret)
+            self.access_token = data['access_token']
+            self.kite.set_access_token(self.access_token)
+            self.request_token = request_token  # Store for reference
+            logging.info("Successfully authenticated with Zerodha Kite Connect")
+            return True
+        except Exception as e:
+            error_msg = str(e)
+            logging.error(f"Authentication failed: {error_msg}")
+            self.access_token = None
+            
+            # Provide more specific error messages
+            if "checksum" in error_msg.lower():
+                detailed_error = (
+                    f"Invalid checksum error. This usually means:\n"
+                    f"1. API secret is incorrect or doesn't match the API key\n"
+                    f"2. Request token is invalid or expired\n"
+                    f"3. Request token was generated with a different API key\n"
+                    f"4. API secret contains extra whitespace or special characters\n"
+                    f"Original error: {error_msg}"
+                )
+                logging.error(detailed_error)
+                raise ValueError(detailed_error) from e
+            elif "invalid" in error_msg.lower() or "expired" in error_msg.lower():
+                detailed_error = (
+                    f"Invalid or expired request token. Please generate a new request token.\n"
+                    f"Original error: {error_msg}"
+                )
+                logging.error(detailed_error)
+                raise ValueError(detailed_error) from e
+            else:
+                # Re-raise the original exception with context
+                raise ValueError(
+                    f"Failed to authenticate: {error_msg}\n"
+                    f"Please verify your API credentials and request token are correct."
+                ) from e
     
     def get_underlying_price(self, symbol="NSE:NIFTY 50"):
         """Get the current price of the underlying asset"""
