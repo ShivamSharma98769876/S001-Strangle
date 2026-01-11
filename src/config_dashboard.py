@@ -1630,413 +1630,211 @@ def live_trader_page():
 @app.route('/api/live-trader/logs', methods=['GET'])
 @require_authentication
 def get_live_trader_logs():
-    """Get Live Trader logs for current session"""
+    """Get Live Trader logs for current session - ULTRA-OPTIMIZED for Azure (< 5 seconds)
+    
+    This endpoint is called every 3 seconds, so it MUST respond quickly to avoid timeouts.
+    Strategy:
+    1. First check in-memory subprocess buffer (instant)
+    2. If buffer has logs, return immediately (no file I/O)
+    3. Only check log file if buffer is empty and file check is quick
+    4. Always return within 5 seconds to avoid Azure gateway timeout
+    """
+    import time as time_module
+    start_time = time_module.time()
+    MAX_RESPONSE_TIME = 5.0  # Max 5 seconds to respond
+    
     try:
-        # Get per-session strategy manager
-        manager = get_strategy_manager()
-        creds = SaaSSessionManager.get_credentials()
-        account_name = creds.get('full_name') or creds.get('broker_id') or 'Unknown'
-        broker_id = creds.get('broker_id') or SaaSSessionManager.get_broker_id()
-        
-        logs = []
-        
-        # First, try to get logs from per-session buffer
-        if manager:
-            buffer_logs = manager.get_logs(max_lines=500)
-            if buffer_logs:
-                logs.extend(buffer_logs)
-                logging.debug(f"[LOGS] [{account_name}] Retrieved {len(buffer_logs)} lines from per-session buffer")
-        
-        # Import environment functions at the start
-        from datetime import date
-        from environment import format_date_for_filename, is_azure_environment, sanitize_account_name_for_filename
-        
-        # Try to read from log file if strategy is running
-        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        src_dir = os.path.join(script_dir, 'src')  # Log files are in src directory
-        src_logs_dir = os.path.join(src_dir, 'logs')  # Log files are in src/logs directory (local)
-        
-        # Look for today's log file
-        today = date.today().strftime('%Y-%m-%d')  # For backward compatibility searches
-        today_formatted = format_date_for_filename(date.today())  # New format: YYYYMONDD
-        
-        # Try to find log files
-        log_files = []
-        
-        # CRITICAL: Get broker_id from session (SaaS-compliant multi-user isolation)
-        # MUST use broker_id only - no fallback to account name for security
-        broker_id = SaaSSessionManager.get_broker_id()
+        # Quick session access - direct for speed (avoid SaaSSessionManager method calls)
+        broker_id = session.get('saas_broker_id')
+        account_name = session.get('saas_full_name') or broker_id or 'Unknown'
         
         if not broker_id:
-            # If no broker_id, user is not properly authenticated - return error
-            logging.error("[LOGS] No broker_id found in session - user not authenticated")
             return jsonify({
                 'success': False,
-                'error': 'User not authenticated. Please log in again.',
-                'logs': ['[ERROR] Authentication required. Please log in to view logs.'],
-                'log_file_path': None,
-                'log_files_found': 0
+                'error': 'Not authenticated',
+                'logs': ['[INFO] Please authenticate to view logs.'],
+                'log_file_path': None
             }), 401
         
-        # Use broker_id for log file matching (multi-user isolation)
-        # broker_id is the Zerodha ID and is the primary identifier
-        account = broker_id
-        logging.info(f"[LOGS] [{account_name}] [broker_id: {broker_id}] Using broker_id from session for log matching (Zerodha ID)")
+        logs = []
+        log_file_path = None
         
-        # Simplify: Only look for today's log file in format: {broker_id}_{YYYYMONDD}.log
-        # Get sanitized broker_id (first name only)
-        if account:
-            sanitized_account = sanitize_account_name_for_filename(account)
-            log_filename = f'{sanitized_account}_{today_formatted}.log'
-            logging.info(f"[LOGS] [broker_id: {broker_id}] Looking for today's log file: '{log_filename}' (sanitized: '{sanitized_account}')")
-            
-            # LOCAL ENVIRONMENT: Check src/logs directory
-            if not is_azure_environment():
-                # Ensure directory exists
-                if not os.path.exists(src_logs_dir):
-                    try:
-                        os.makedirs(src_logs_dir, exist_ok=True)
-                        logging.info(f"[LOGS] Created src/logs directory: {src_logs_dir}")
-                    except Exception as e:
-                        logging.warning(f"[LOGS] Could not create src/logs directory: {e}")
-                
-                # Look for today's log file in src/logs
-                today_log_path = os.path.join(src_logs_dir, log_filename)
-                if os.path.exists(today_log_path):
-                    log_files.append(today_log_path)
-                    logging.info(f"[LOGS] ✓ Found today's log file: {today_log_path}")
-                else:
-                    logging.info(f"[LOGS] Today's log file does not exist: {today_log_path}")
-            
-            # AZURE ENVIRONMENT: Check /tmp/{account}/logs/ directory
-            else:
-                from environment import get_log_directory
-                if account:
-                    sanitized_account = sanitize_account_name_for_filename(account)
-                    azure_log_dir = os.path.join('/tmp', sanitized_account, 'logs')
-                else:
-                    azure_log_dir = '/tmp/logs'
-                
-                # Ensure directory exists
-                os.makedirs(azure_log_dir, exist_ok=True)
-                logging.info(f"[LOGS] Azure environment - checking log directory: {azure_log_dir}")
-                
-                # Verify directory is writable (test write permissions)
-                try:
-                    test_file = os.path.join(azure_log_dir, '.test_write')
-                    with open(test_file, 'w') as f:
-                        f.write('test')
-                    os.remove(test_file)
-                    logging.info(f"[LOGS] Directory is writable: {azure_log_dir}")
-                except Exception as perm_error:
-                    logging.error(f"[LOGS] Directory may not be writable: {azure_log_dir}, error: {perm_error}")
-                
-                # Look for today's log file
-                today_log_path = os.path.join(azure_log_dir, log_filename)
-                if os.path.exists(today_log_path):
-                    log_files.append(today_log_path)
-                    file_size = os.path.getsize(today_log_path)
-                    logging.info(f"[LOGS] ✓ Found today's log file: {today_log_path} (size: {file_size} bytes)")
-                else:
-                    logging.info(f"[LOGS] Today's log file does not exist: {today_log_path}")
-                    # Check if strategy process is running - if not, that's why no log file exists
-                    if strategy_process is None:
-                        logging.warning(f"[LOGS] Strategy process is not running - log file will be created when strategy starts")
-                    elif strategy_process is not None:
-                        try:
-                            if strategy_process.poll() is None:
-                                logging.info(f"[LOGS] Strategy process is running (PID: {strategy_process.pid}) - log file should be created soon")
-                            else:
-                                logging.warning(f"[LOGS] Strategy process terminated (return code: {strategy_process.returncode}) - may have crashed before creating log file")
-                        except:
-                            pass
-                    # List files in directory for debugging
-                    try:
-                        if os.path.exists(azure_log_dir):
-                            all_files = os.listdir(azure_log_dir)
-                            logging.info(f"[LOGS] Files in Azure log directory: {all_files}")
-                            if not all_files:
-                                logging.info(f"[LOGS] Directory is empty - strategy may not have started logging yet")
-                    except Exception as e:
-                        logging.warning(f"[LOGS] Could not list Azure log directory: {e}")
-        
-        # FIRST: Check subprocess output buffer (real-time logs) - this should always be checked
-        subprocess_logs = []
+        # STEP 1: Check subprocess output buffer FIRST (instant - in-memory)
+        # This is the fastest source and contains the most recent logs
         with strategy_output_lock:
-            subprocess_logs = list(strategy_output_buffer)  # Copy buffer
+            subprocess_logs = list(strategy_output_buffer[-200:])  # Copy last 200 lines
         
         if subprocess_logs:
-            logging.info(f"[LOGS] Found {len(subprocess_logs)} lines in subprocess output buffer")
-            # Log first few lines for debugging
-            preview_lines = subprocess_logs[:5] if len(subprocess_logs) >= 5 else subprocess_logs
-            logging.info(f"[LOGS] Buffer preview (first {len(preview_lines)} lines): {preview_lines}")
-            # Add subprocess logs to all_lines (these are the most recent/real-time)
-            all_lines = list(subprocess_logs)
-        else:
-            all_lines = []
-            logging.info(f"[LOGS] No subprocess output in buffer yet (strategy may be starting or not running)")
-            # Check if strategy process exists and provide detailed diagnostics
-            if strategy_process is not None:
-                try:
-                    poll_result = strategy_process.poll()
-                    if poll_result is None:
-                        logging.info(f"[LOGS] Strategy process is running (PID: {strategy_process.pid}) but no output in buffer yet")
-                        logging.info(f"[LOGS] Process may still be initializing - logs should appear shortly")
-                        # Check if log file exists but is empty (process just started)
-                        if is_azure_environment() and account:
-                            from environment import sanitize_account_name_for_filename
-                            sanitized_account = sanitize_account_name_for_filename(account)
-                            azure_log_dir = os.path.join('/tmp', sanitized_account, 'logs')
-                            today_log_path = os.path.join(azure_log_dir, log_filename)
-                            if os.path.exists(today_log_path):
-                                file_size = os.path.getsize(today_log_path)
-                                logging.info(f"[LOGS] Log file exists but may be empty (size: {file_size} bytes)")
-                    else:
-                        logging.warning(f"[LOGS] Strategy process terminated (return code: {poll_result}) - no output captured")
-                        logging.warning(f"[LOGS] Strategy may have crashed - check error logs or restart the strategy")
-                except Exception as e:
-                    logging.warning(f"[LOGS] Could not check strategy process status: {e}")
-            else:
-                logging.warning(f"[LOGS] Strategy process is None - strategy may not be running")
-                logging.warning(f"[LOGS] Start the strategy first to generate logs")
-        
-        # THEN: Check log files (as fallback/persistent storage)
-        if not log_files:
-            logging.warning(f"[LOGS] [broker_id: {broker_id}] No log files found for broker_id: {broker_id}, date: {today}")
-            # Log checked directories based on environment
-            if is_azure_environment():
-                # For error message, try to get account-specific directory
-                from environment import sanitize_account_name_for_filename
-                if account:
-                    sanitized_account = sanitize_account_name_for_filename(account)
-                    checked_dirs = f"Azure log directory: /tmp/{sanitized_account}/logs/"
-                else:
-                    checked_dirs = f"Azure log directory: /tmp/logs/"
-            else:
-                checked_dirs = f"src_logs_dir={src_logs_dir}, src_dir={src_dir}, root={script_dir}"
-            logging.warning(f"[LOGS] Checked directories: {checked_dirs}")
-            
-            # List existing files for debugging
-            if is_azure_environment():
-                # Use account-specific directory: /tmp/{account_name}/logs/
-                if account:
-                    sanitized_account = sanitize_account_name_for_filename(account)
-                    azure_log_dir = os.path.join('/tmp', sanitized_account, 'logs')
-                else:
-                    azure_log_dir = '/tmp/logs'
-                # Ensure directory exists (create if it doesn't)
-                os.makedirs(azure_log_dir, exist_ok=True)
-                try:
-                    existing_files = os.listdir(azure_log_dir)
-                    logging.info(f"[LOGS] Files in Azure log directory ({azure_log_dir}): {existing_files}")
-                except Exception as e:
-                    logging.warning(f"[LOGS] Could not list Azure log directory: {e}")
-            else:
-                if os.path.exists(src_logs_dir):
-                    try:
-                        existing_files = os.listdir(src_logs_dir)
-                        logging.info(f"[LOGS] Files in src/logs: {existing_files}")
-                    except:
-                        pass
-            
-            # If we have subprocess logs, return them even if no log files exist
-            if subprocess_logs:
-                logging.info(f"[LOGS] Returning {len(subprocess_logs)} lines from subprocess buffer (no log files found yet)")
-                # Remove duplicates while preserving order
-                seen = set()
-                unique_logs = []
-                for log in subprocess_logs:
-                    if log not in seen:
-                        seen.add(log)
-                        unique_logs.append(log)
-                
-                return jsonify({
-                    'success': True,
-                    'logs': unique_logs[-1000:],  # Last 1000 entries
-                    'log_file_path': None,
-                    'message': f'Showing real-time logs from strategy ({len(unique_logs)} lines). Log files will appear once strategy writes to disk.'
-                })
-            
-            # Only return empty if we have neither subprocess logs nor log files
-            env_msg = "Azure log directory" if is_azure_environment() else "src/logs, src, root"
+            logs = subprocess_logs
+            # If we have subprocess logs, return immediately - this is the freshest data
             return jsonify({
                 'success': True,
-                'logs': [],
+                'logs': logs,
                 'log_file_path': None,
-                'message': f'No log files found for account: {account}, date: {today}. Checked: {env_msg}. Logs will appear once the strategy starts.'
+                'message': f'Showing {len(logs)} real-time log lines'
             })
         
-        # Read last 500 lines from log files (increased to show more logs)
-        # Prioritize: read from first file (most relevant) first, then others
-        log_files_read = []
-        for log_path in log_files:
-            try:
-                logging.info(f"[LOGS] Attempting to read log file: {log_path}")
-                if not os.path.exists(log_path):
-                    logging.warning(f"[LOGS] Log file does not exist: {log_path}")
-                    continue
-                    
-                # Check file size
-                file_size = os.path.getsize(log_path)
-                logging.info(f"[LOGS] Log file size: {file_size} bytes")
+        # STEP 2: Check per-session manager buffer (also in-memory)
+        # Get manager quickly using direct dict access
+        device_id = session.get('saas_device_id')
+        manager_key = f"{broker_id}_{device_id}"
+        
+        with _strategy_managers_lock:
+            manager = _strategy_managers.get(manager_key)
+        
+        if manager:
+            buffer_logs = manager.get_logs(max_lines=200)
+            if buffer_logs:
+                logs = buffer_logs
+                return jsonify({
+                    'success': True,
+                    'logs': logs,
+                    'log_file_path': None,
+                    'message': f'Showing {len(logs)} log lines from session buffer'
+                })
+        
+        # Check if we're running out of time
+        elapsed = time_module.time() - start_time
+        if elapsed > MAX_RESPONSE_TIME - 1:  # Leave 1 second margin
+            return jsonify({
+                'success': True,
+                'logs': ['[INFO] No logs available yet. Start the strategy to generate logs.'],
+                'log_file_path': None,
+                'message': 'No logs in memory buffer'
+            })
+        
+        # STEP 3: Try to read from log file (only if quick)
+        # Import lazily to avoid startup delay
+        try:
+            from environment import format_date_for_filename, is_azure_environment, sanitize_account_name_for_filename
+            from datetime import date
+            
+            sanitized_account = sanitize_account_name_for_filename(broker_id)
+            today_formatted = format_date_for_filename(date.today())
+            log_filename = f'{sanitized_account}_{today_formatted}.log'
+            
+            # Determine log directory based on environment
+            if is_azure_environment():
+                log_dir = os.path.join('/tmp', sanitized_account, 'logs')
+            else:
+                script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                log_dir = os.path.join(script_dir, 'src', 'logs')
+            
+            log_file_path = os.path.join(log_dir, log_filename)
+            
+            # Quick file check - only if file exists and is small enough
+            if os.path.exists(log_file_path):
+                file_size = os.path.getsize(log_file_path)
                 
-                with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    lines = f.readlines()
-                    # Get last 500 lines from each file to show more detailed logs
-                    file_lines = lines[-500:] if len(lines) > 500 else lines
-                    # Merge file lines with subprocess buffer (avoid duplicates)
-                    # File logs are older, subprocess buffer has latest
-                    # Combine: file logs + new subprocess logs not in file
-                    existing_texts = set(all_lines)  # What we already have
-                    for file_line in file_lines:
-                        file_line_stripped = file_line.strip()
-                        if file_line_stripped and file_line_stripped not in existing_texts:
-                            all_lines.append(file_line_stripped)
-                            existing_texts.add(file_line_stripped)
-                    
-                    log_files_read.append(log_path)
-                    logging.info(f"[LOGS] Successfully read {len(file_lines)} lines from {log_path} (total lines in file: {len(lines)})")
-            except PermissionError as e:
-                logging.error(f"[LOGS] Permission denied reading log file {log_path}: {e}")
-            except Exception as e:
-                logging.error(f"[LOGS] Error reading log file {log_path}: {e}")
-                import traceback
-                logging.error(f"[LOGS] Traceback: {traceback.format_exc()}")
+                # Only read if file is < 1MB to avoid long reads
+                if file_size < 1000000:
+                    # Check time again
+                    elapsed = time_module.time() - start_time
+                    if elapsed < MAX_RESPONSE_TIME - 2:  # Need 2 seconds for file read
+                        with open(log_file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            if file_size < 100000:  # Small file - read all
+                                lines = f.readlines()
+                                logs = [line.strip() for line in lines[-200:] if line.strip()]
+                            else:  # Larger file - tail approach
+                                f.seek(max(0, file_size - 50000))
+                                f.readline()  # Skip partial line
+                                remaining = f.read()
+                                logs = [line.strip() for line in remaining.splitlines()[-200:] if line.strip()]
+                        
+                        if logs:
+                            return jsonify({
+                                'success': True,
+                                'logs': logs,
+                                'log_file_path': log_file_path,
+                                'message': f'Showing {len(logs)} lines from log file'
+                            })
+        except Exception as e:
+            logging.debug(f"[LOGS] File read skipped: {e}")
+        
+        # STEP 4: No logs found - return helpful message
+        strategy_status = "not running"
+        if strategy_process is not None:
+            try:
+                if strategy_process.poll() is None:
+                    strategy_status = f"running (PID: {strategy_process.pid})"
+                else:
+                    strategy_status = f"stopped (exit code: {strategy_process.returncode})"
+            except:
                 pass
         
-        if log_files_read:
-            logging.info(f"[LOGS] Successfully read from {len(log_files_read)} log file(s): {log_files_read}")
-        elif subprocess_logs:
-            logging.info(f"[LOGS] Using subprocess output buffer ({len(subprocess_logs)} lines) - log file not found yet")
-        else:
-            logging.warning(f"[LOGS] No log files were successfully read from {len(log_files)} attempted file(s) and no subprocess output available")
-        
-        # Show ALL logs (remove filtering to display complete log details)
-        # Sort by timestamp if available, otherwise keep order
-        # Use all_lines which already contains subprocess buffer + file logs
-        for line in all_lines[-1000:]:  # Show last 1000 lines (increased for better visibility)
-            if isinstance(line, str):
-                line = line.strip()
-            else:
-                line = str(line).strip()
-            if line:  # Only add non-empty lines
-                logs.append(line)
-        
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_logs = []
-        for log in logs:
-            if log not in seen:
-                seen.add(log)
-                unique_logs.append(log)
-        
-        # Include log file path and any error messages in response
-        response_data = {
+        return jsonify({
             'success': True,
-            'logs': unique_logs[-1000:],  # Last 1000 entries (increased for better visibility)
-            'log_file_path': log_files[0] if log_files else None,  # Return log file path for reference
-            'log_files_found': len(log_files),
-            'log_files_read': len(log_files_read),
-            'log_files': log_files_read if log_files_read else log_files[:5]  # Show up to 5 file paths
-        }
-        
-        # Add log file path and debug info to logs for visibility
-        if log_files and log_files[0]:
-            log_path_msg = f"[LOG SETUP] Log file path: {log_files[0]}"
-            # Check if already in logs to avoid duplicates
-            if not any(log_path_msg in log for log in unique_logs):
-                unique_logs.insert(0, log_path_msg)
-            
-            # Add info about log file search
-            if response_data.get('log_files_found', 0) > 0:
-                search_info = f"[LOG SETUP] Found {response_data['log_files_found']} log file(s), read {response_data['log_files_read']} successfully"
-                if search_info not in unique_logs:
-                    unique_logs.insert(1, search_info)
-        else:
-            # No log files found - add helpful message with strategy status
-            strategy_status_msg = ""
-            if strategy_process is None:
-                strategy_status_msg = "[LOG SETUP] Strategy process is not running. Please start the strategy to generate logs."
-            else:
-                try:
-                    poll_result = strategy_process.poll()
-                    if poll_result is None:
-                        strategy_status_msg = f"[LOG SETUP] Strategy process is running (PID: {strategy_process.pid}) but no logs yet. Logs should appear shortly."
-                    else:
-                        strategy_status_msg = f"[LOG SETUP] Strategy process terminated (return code: {poll_result}). The strategy may have crashed. Please restart the strategy."
-                except:
-                    strategy_status_msg = "[LOG SETUP] Strategy process status unknown. Please check if the strategy is running."
-            
-            if not strategy_status_msg:
-                strategy_status_msg = "[LOG SETUP] No log files found yet. Logs will appear here once the strategy starts running."
-            
-            if strategy_status_msg not in unique_logs:
-                unique_logs.insert(0, strategy_status_msg)
-            
-            # Also add directory info for Azure
-            if is_azure_environment() and account:
-                from environment import sanitize_account_name_for_filename
-                sanitized_account = sanitize_account_name_for_filename(account)
-                azure_log_dir = os.path.join('/tmp', sanitized_account, 'logs')
-                dir_info = f"[LOG SETUP] Log directory: {azure_log_dir}"
-                if dir_info not in unique_logs:
-                    unique_logs.insert(1, dir_info)
-        
-        response_data['logs'] = unique_logs[-500:]
-        return jsonify(response_data)
+            'logs': [
+                f'[INFO] No logs available yet.',
+                f'[INFO] Strategy status: {strategy_status}',
+                f'[INFO] Account: {account_name}',
+                '[INFO] Logs will appear here once the strategy starts running.'
+            ],
+            'log_file_path': log_file_path,
+            'message': 'No logs found - strategy may not have started yet'
+        })
     except Exception as e:
-        import traceback
-        error_traceback = traceback.format_exc()
-        logging.error(f"[LOGS] Error in get_live_trader_logs: {e}\n{error_traceback}")
-        
-        # Return error in logs so it shows up in Live Trading Log section
-        error_logs = [
-            f"[ERROR] Failed to retrieve logs: {str(e)}",
-            f"[ERROR] Traceback: {error_traceback[:500]}"  # Limit traceback length
-        ]
-        
+        logging.error(f"[LOGS] Error: {e}")
         return jsonify({
             'success': False,
             'error': str(e),
-            'logs': error_logs,  # Include error in logs so it shows on screen
-            'log_file_path': None,
-            'log_files_found': 0
+            'logs': [f'[ERROR] {str(e)}'],
+            'log_file_path': None
         }), 500
 
 @app.route('/api/live-trader/status', methods=['GET'])
 @require_authentication
 def live_trader_status():
-    """Get Live Trader engine status for current session"""
+    """Get Live Trader engine status for current session - OPTIMIZED for fast response (< 100ms)
+    
+    This endpoint is called frequently (every 5 seconds), so it must be fast.
+    - Quick session access
+    - Minimal manager operations
+    - No file I/O
+    """
     try:
-        # Get per-session strategy manager
-        manager = get_strategy_manager()
-        if not manager:
+        # Quick session access - direct for speed
+        broker_id = session.get('saas_broker_id')
+        device_id = session.get('saas_device_id')
+        
+        if not broker_id:
             return jsonify({
                 'running': False,
                 'strategy_running': False,
                 'error': 'No session found'
             }), 401
         
-        # Check actual process status
+        # Get manager using composite key - quick dict lookup
+        manager_key = f"{broker_id}_{device_id}"
+        
+        with _strategy_managers_lock:
+            manager = _strategy_managers.get(manager_key)
+        
+        if not manager:
+            # No manager yet - not running
+            return jsonify({
+                'running': False,
+                'strategy_running': False,
+                'process_id': None,
+                'account_name': session.get('saas_full_name') or broker_id or 'Unknown',
+                'broker_id': broker_id
+            })
+        
+        # Check actual process status - quick poll check
         actual_running = manager.is_running()
         manager.strategy_running = actual_running
         
-        creds = SaaSSessionManager.get_credentials()
-        account_name = creds.get('full_name') or creds.get('broker_id') or 'Unknown'
-        
-        logging.debug(f"[LIVE TRADER STATUS] [{account_name}] Status - running: {actual_running}")
+        account_name = session.get('saas_full_name') or broker_id or 'Unknown'
         
         return jsonify({
             'running': actual_running,
             'strategy_running': actual_running,
             'process_id': manager.process_id if actual_running else None,
             'account_name': account_name,
-            'broker_id': manager.broker_id
+            'broker_id': broker_id
         })
     except Exception as e:
         logging.error(f"[LIVE TRADER STATUS] Error: {e}")
-        import traceback
-        logging.error(f"[LIVE TRADER STATUS] Traceback: {traceback.format_exc()}")
         return jsonify({
             'running': False,
             'strategy_running': False,
@@ -2521,9 +2319,17 @@ def stop_strategy():
 # Authentication API Endpoints
 @app.route('/api/auth/status', methods=['GET'])
 def auth_status():
-    """Check authentication status (SaaS-compliant) - Only returns authenticated=True if access_token exists"""
+    """Check authentication status (SaaS-compliant) - OPTIMIZED for fast response (< 100ms)
+    
+    This endpoint is called frequently by the frontend (every 5 seconds), so it must be fast.
+    - No file I/O operations
+    - No database calls
+    - Minimal session access
+    - Returns immediately with minimal data
+    """
     try:
-        is_authenticated = SaaSSessionManager.is_authenticated()
+        # Quick session check - use direct session access for speed
+        is_authenticated = session.get('saas_authenticated', False)
         
         if not is_authenticated:
             return jsonify({
@@ -2532,20 +2338,36 @@ def auth_status():
                 'message': 'Not authenticated'
             })
         
-        creds = SaaSSessionManager.get_credentials()
-        has_access_token = bool(creds.get('access_token'))
+        # Quick expiration check - avoid full is_authenticated() call for speed
+        expires_at_str = session.get('saas_expires_at')
+        if expires_at_str:
+            try:
+                expires_at = datetime.fromisoformat(expires_at_str)
+                if datetime.now() > expires_at:
+                    # Session expired - clear and return unauthenticated
+                    return jsonify({
+                        'authenticated': False,
+                        'has_access_token': False,
+                        'message': 'Session expired'
+                    })
+            except (ValueError, TypeError):
+                pass
+        
+        # Quick credential access - direct session keys for speed
+        access_token = session.get('saas_access_token')
+        has_access_token = bool(access_token)
         
         # CRITICAL: Only return authenticated=True if access_token exists
         # This prevents showing as connected when session exists but no valid token
         return jsonify({
             'authenticated': has_access_token,  # Only true if access_token exists
             'has_access_token': has_access_token,
-            'user_id': creds.get('user_id'),
-            'broker_id': creds.get('broker_id'),
-            'device_id': creds.get('device_id'),
-            'email': creds.get('email'),
-            'full_name': creds.get('full_name'),
-            'account_name': creds.get('full_name') or 'Trading Account'
+            'user_id': session.get('saas_user_id'),
+            'broker_id': session.get('saas_broker_id'),
+            'device_id': session.get('saas_device_id'),
+            'email': session.get('saas_email'),
+            'full_name': session.get('saas_full_name'),
+            'account_name': session.get('saas_full_name') or 'Trading Account'
         })
     except Exception as e:
         logging.error(f"[AUTH] Error checking auth status: {e}")

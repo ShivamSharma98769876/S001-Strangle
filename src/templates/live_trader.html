@@ -865,43 +865,166 @@
         // Fetch lot size from config
         async function fetchLotSize() {
             try {
-                const response = await fetch('/api/config/lot-size');
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.success) {
-                        lotSize = data.lot_size;
-                        
-                        // Update lot size display fields
-                        const callLotSizeInput = document.getElementById('callLotSize');
-                        const putLotSizeInput = document.getElementById('putLotSize');
-                        if (callLotSizeInput) callLotSizeInput.value = lotSize;
-                        if (putLotSizeInput) putLotSizeInput.value = lotSize;
-                        
-                        // Update formula display lot sizes
-                        const callLotSizeDisplay = document.getElementById('callLotSizeDisplay');
-                        const putLotSizeDisplay = document.getElementById('putLotSizeDisplay');
-                        if (callLotSizeDisplay) callLotSizeDisplay.textContent = lotSize;
-                        if (putLotSizeDisplay) putLotSizeDisplay.textContent = lotSize;
-                        
-                        // Set default lots (2 lots)
-                        const callLotsInput = document.getElementById('callLots');
-                        const putLotsInput = document.getElementById('putLots');
-                        if (callLotsInput && !callLotsInput.value) {
-                            callLotsInput.value = 2;
-                        }
-                        if (putLotsInput && !putLotsInput.value) {
-                            putLotsInput.value = 2;
-                        }
-                        
-                        // Update quantity displays (this will also update formula displays)
-                        updateQuantityDisplay();
-                        
-                        console.log(`[LOT SIZE] Loaded from config: ${lotSize}`);
+                const data = await fetchWithTimeout('/api/config/lot-size', {}, 8000);
+                if (data.success) {
+                    lotSize = data.lot_size;
+                    
+                    // Update lot size display fields
+                    const callLotSizeInput = document.getElementById('callLotSize');
+                    const putLotSizeInput = document.getElementById('putLotSize');
+                    if (callLotSizeInput) callLotSizeInput.value = lotSize;
+                    if (putLotSizeInput) putLotSizeInput.value = lotSize;
+                    
+                    // Update formula display lot sizes
+                    const callLotSizeDisplay = document.getElementById('callLotSizeDisplay');
+                    const putLotSizeDisplay = document.getElementById('putLotSizeDisplay');
+                    if (callLotSizeDisplay) callLotSizeDisplay.textContent = lotSize;
+                    if (putLotSizeDisplay) putLotSizeDisplay.textContent = lotSize;
+                    
+                    // Set default lots (2 lots)
+                    const callLotsInput = document.getElementById('callLots');
+                    const putLotsInput = document.getElementById('putLots');
+                    if (callLotsInput && !callLotsInput.value) {
+                        callLotsInput.value = 2;
                     }
+                    if (putLotsInput && !putLotsInput.value) {
+                        putLotsInput.value = 2;
+                    }
+                    
+                    // Update quantity displays (this will also update formula displays)
+                    updateQuantityDisplay();
+                    
+                    console.log(`[LOT SIZE] Loaded from config: ${lotSize}`);
                 }
             } catch (error) {
                 console.error('[LOT SIZE] Error fetching lot size:', error);
                 // Use default 75 if fetch fails
+            }
+        }
+
+        // Helper function for fetch with timeout and proper error handling
+        // OPTIMIZED: Better handling of Azure gateway timeouts and non-JSON responses
+        async function fetchWithTimeout(url, options = {}, timeout = 10000) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeout);
+            
+            try {
+                const response = await fetch(url, {
+                    ...options,
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                
+                // Get content type to determine response handling
+                const contentType = response.headers.get('content-type') || '';
+                const isJson = contentType.includes('application/json');
+                
+                // Check if response is OK
+                if (!response.ok) {
+                    // Handle different error types
+                    if (response.status === 504) {
+                        console.warn(`[FETCH] 504 Gateway Timeout for ${url}`);
+                        throw new Error('Server is taking too long to respond. Please try again.');
+                    }
+                    
+                    if (response.status === 502) {
+                        console.warn(`[FETCH] 502 Bad Gateway for ${url}`);
+                        throw new Error('Server temporarily unavailable. Please try again.');
+                    }
+                    
+                    if (response.status === 503) {
+                        console.warn(`[FETCH] 503 Service Unavailable for ${url}`);
+                        throw new Error('Service temporarily unavailable. Please try again.');
+                    }
+                    
+                    // Try to get error details
+                    let errorText = `HTTP ${response.status}`;
+                    try {
+                        if (isJson) {
+                            const errorData = await response.json();
+                            errorText = errorData.error || errorData.message || errorText;
+                        } else {
+                            const text = await response.text();
+                            // Check for HTML error pages (like Azure error pages)
+                            if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+                                // It's an HTML error page - extract meaningful info
+                                if (text.includes('504') || text.includes('Gateway Timeout')) {
+                                    errorText = 'Server timeout (504)';
+                                } else if (text.includes('502') || text.includes('Bad Gateway')) {
+                                    errorText = 'Server unavailable (502)';
+                                } else if (text.includes('503')) {
+                                    errorText = 'Service unavailable (503)';
+                                } else if (text.includes('500')) {
+                                    errorText = 'Server error (500)';
+                                }
+                            } else {
+                                errorText = text.substring(0, 200);
+                            }
+                        }
+                    } catch (e) {
+                        // Ignore parsing errors, use default error text
+                    }
+                    throw new Error(errorText);
+                }
+                
+                // Parse successful response
+                if (isJson) {
+                    try {
+                        return await response.json();
+                    } catch (e) {
+                        // JSON parsing failed - might be empty or corrupted
+                        console.warn(`[FETCH] JSON parse error for ${url}:`, e.message);
+                        // Return a default success response for status endpoints
+                        if (url.includes('/status')) {
+                            return { running: false, authenticated: false };
+                        }
+                        if (url.includes('/logs')) {
+                            return { success: true, logs: ['[INFO] Waiting for logs...'] };
+                        }
+                        throw new Error('Invalid response format');
+                    }
+                } else {
+                    // Non-JSON response - check if it's an HTML error page
+                    const text = await response.text();
+                    if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+                        console.warn(`[FETCH] Received HTML instead of JSON for ${url}`);
+                        // Return default for status checks
+                        if (url.includes('/status')) {
+                            return { running: false, authenticated: false };
+                        }
+                        if (url.includes('/logs')) {
+                            return { success: true, logs: ['[INFO] Server returned HTML - retrying...'] };
+                        }
+                        throw new Error('Server returned unexpected response');
+                    }
+                    return text;
+                }
+            } catch (error) {
+                clearTimeout(timeoutId);
+                
+                // Handle abort/timeout
+                if (error.name === 'AbortError') {
+                    console.warn(`[FETCH] Request aborted/timeout for ${url}`);
+                    // Return default values instead of throwing for status checks
+                    if (url.includes('/auth/status')) {
+                        return { authenticated: false, has_access_token: false };
+                    }
+                    if (url.includes('/live-trader/status')) {
+                        return { running: false, strategy_running: false };
+                    }
+                    if (url.includes('/live-trader/logs')) {
+                        return { success: true, logs: ['[INFO] Loading logs...'] };
+                    }
+                    throw new Error('Request timed out - server may be busy');
+                }
+                
+                // Handle network errors
+                if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                    console.warn(`[FETCH] Network error for ${url}`);
+                    throw new Error('Network error - please check your connection');
+                }
+                
+                throw error;
             }
         }
 
@@ -936,11 +1059,11 @@
                 putLotSizeInput.addEventListener('change', updateQuantityDisplay);
             }
 
-            // Auto-refresh status every 5 seconds
-            setInterval(checkStatus, 5000);
+            // Auto-refresh status every 8 seconds (increased from 5 to reduce server load)
+            setInterval(checkStatus, 8000);
             
-            // Auto-refresh logs every 3 seconds
-            logsInterval = setInterval(loadLogs, 3000);
+            // Auto-refresh logs every 5 seconds (increased from 3 to reduce server load)
+            logsInterval = setInterval(loadLogs, 5000);
         });
 
         function updatePyramidingConfig() {
@@ -954,9 +1077,10 @@
 
         async function checkStatus() {
             try {
-                // Check authentication
-                const authResponse = await fetch('/api/auth/status');
-                const authData = await authResponse.json();
+                // Check authentication with timeout
+                const authData = await fetchWithTimeout('/api/auth/status', {
+                    credentials: 'include'
+                }, 8000);
                 
                 // Update Kite status
                 const kiteStatus = document.getElementById('kiteStatus');
@@ -1012,21 +1136,15 @@
                 // Check engine status from server - MUST check before updating UI
                 let actualRunning = false;
                 try {
-                    const statusResponse = await fetch('/api/live-trader/status');
-                    if (statusResponse.ok) {
-                        const statusData = await statusResponse.json();
-                        actualRunning = statusData.running || false;
-                        // Update isRunning to match server state
-                        isRunning = actualRunning;
-                        console.log('[STATUS] Engine status from server:', actualRunning ? 'Running' : 'Stopped');
-                        console.log('[STATUS] Full status data:', statusData);
-                    } else {
-                        console.error('[STATUS] Failed to get engine status:', statusResponse.status);
-                        const errorText = await statusResponse.text();
-                        console.error('[STATUS] Error response:', errorText);
-                    }
+                    const statusData = await fetchWithTimeout('/api/live-trader/status', {}, 8000);
+                    actualRunning = statusData.running || false;
+                    // Update isRunning to match server state
+                    isRunning = actualRunning;
+                    console.log('[STATUS] Engine status from server:', actualRunning ? 'Running' : 'Stopped');
+                    console.log('[STATUS] Full status data:', statusData);
                 } catch (error) {
-                    console.error('[STATUS] Error checking engine status:', error);
+                    console.error('[STATUS] Error checking engine status:', error.message);
+                    // Don't update UI on error - keep current state
                 }
                 
                 const engineStatus = document.getElementById('engineStatus');
@@ -1091,27 +1209,32 @@
                     updateAccountNameDisplay(authData.account_name);
                 }
             } catch (error) {
-                console.error('Error checking status:', error);
+                // Only log unexpected errors (not timeouts which are expected on slow connections)
+                if (error.name !== 'AbortError' && 
+                    !error.message.includes('timeout') &&
+                    !error.message.includes('too long') &&
+                    !error.message.includes('Server') &&
+                    !error.message.includes('unavailable')) {
+                    console.warn('[STATUS] Error checking status:', error.message);
+                }
+                // Don't update UI on error - keep current state to avoid flickering
             }
         }
 
         async function startLiveTrader() {
             // First check actual status from server before starting
             try {
-                const statusResponse = await fetch('/api/live-trader/status');
-                if (statusResponse.ok) {
-                    const statusData = await statusResponse.json();
-                    if (statusData.running) {
-                        const errorEl = document.getElementById('errorMessage');
-                        if (errorEl) {
-                            errorEl.textContent = 'Strategy is already running. Please stop it first.';
-                            errorEl.classList.add('show');
-                        }
-                        // Update UI to reflect running state
-                        isRunning = true;
-                        checkStatus();
-                        return;
+                const statusData = await fetchWithTimeout('/api/live-trader/status', {}, 8000);
+                if (statusData.running) {
+                    const errorEl = document.getElementById('errorMessage');
+                    if (errorEl) {
+                        errorEl.textContent = 'Strategy is already running. Please stop it first.';
+                        errorEl.classList.add('show');
                     }
+                    // Update UI to reflect running state
+                    isRunning = true;
+                    checkStatus();
+                    return;
                 }
             } catch (error) {
                 console.error('[START] Error checking status before start:', error);
@@ -1164,16 +1287,14 @@
                 startBtn.style.cursor = 'not-allowed';
                 startBtn.innerHTML = '<span class="loading-spinner"></span> Starting...';
 
-                const response = await fetch('/api/live-trader/start', {
+                const data = await fetchWithTimeout('/api/live-trader/start', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         callQuantity: callQuantity,
                         putQuantity: putQuantity
                     })
-                });
-
-                const data = await response.json();
+                }, 30000); // 30 second timeout for start operation
 
                 if (data.success) {
                     isRunning = true;
@@ -1212,28 +1333,18 @@
                     }
                     // Verify engine status before re-enabling button
                     try {
-                        const statusResponse = await fetch('/api/live-trader/status');
-                        if (statusResponse.ok) {
-                            const statusData = await statusResponse.json();
-                            if (!statusData.running) {
-                                // Engine is not running, safe to re-enable
-                                startBtn.disabled = false;
-                                startBtn.style.opacity = '1';
-                                startBtn.style.cursor = 'pointer';
-                            } else {
-                                // Engine is actually running, keep button disabled
-                                isRunning = true;
-                                startBtn.disabled = true;
-                                startBtn.style.opacity = '0.6';
-                                startBtn.style.cursor = 'not-allowed';
-                            }
+                        const statusData = await fetchWithTimeout('/api/live-trader/status', {}, 8000);
+                        if (!statusData.running) {
+                            // Engine is not running, safe to re-enable
+                            startBtn.disabled = false;
+                            startBtn.style.opacity = '1';
+                            startBtn.style.cursor = 'pointer';
                         } else {
-                            // If status check fails, re-enable button
-                            if (!isRunning) {
-                                startBtn.disabled = false;
-                                startBtn.style.opacity = '1';
-                                startBtn.style.cursor = 'pointer';
-                            }
+                            // Engine is actually running, keep button disabled
+                            isRunning = true;
+                            startBtn.disabled = true;
+                            startBtn.style.opacity = '0.6';
+                            startBtn.style.cursor = 'not-allowed';
                         }
                     } catch (statusError) {
                         // If status check fails, re-enable button only if not running
@@ -1251,27 +1362,17 @@
                 errorEl.classList.add('show');
                 // Verify engine status before re-enabling button
                 try {
-                    const statusResponse = await fetch('/api/live-trader/status');
-                    if (statusResponse.ok) {
-                        const statusData = await statusResponse.json();
-                        if (!statusData.running && !isRunning) {
-                            startBtn.disabled = false;
-                            startBtn.style.opacity = '1';
-                            startBtn.style.cursor = 'pointer';
-                        } else {
-                            // Engine is running, keep button disabled
-                            isRunning = true;
-                            startBtn.disabled = true;
-                            startBtn.style.opacity = '0.6';
-                            startBtn.style.cursor = 'not-allowed';
-                        }
+                    const statusData = await fetchWithTimeout('/api/live-trader/status', {}, 8000);
+                    if (!statusData.running && !isRunning) {
+                        startBtn.disabled = false;
+                        startBtn.style.opacity = '1';
+                        startBtn.style.cursor = 'pointer';
                     } else {
-                        // If status check fails, re-enable only if not running
-                        if (!isRunning) {
-                            startBtn.disabled = false;
-                            startBtn.style.opacity = '1';
-                            startBtn.style.cursor = 'pointer';
-                        }
+                        // Engine is running, keep button disabled
+                        isRunning = true;
+                        startBtn.disabled = true;
+                        startBtn.style.opacity = '0.6';
+                        startBtn.style.cursor = 'not-allowed';
                     }
                 } catch (statusError) {
                     // If status check fails, re-enable only if not running
@@ -1295,11 +1396,9 @@
                 stopBtn.style.cursor = 'not-allowed';
                 stopBtn.innerHTML = '<span class="loading-spinner"></span> Stopping...';
 
-                const response = await fetch('/api/strategy/stop', {
+                const data = await fetchWithTimeout('/api/strategy/stop', {
                     method: 'POST'
-                });
-
-                const data = await response.json();
+                }, 15000); // 15 second timeout for stop operation
 
                 if (data.status === 'success') {
                     isRunning = false;
@@ -1339,9 +1438,10 @@
 
         async function loadLogs() {
             try {
-                // Get logs from strategy process
-                const response = await fetch('/api/live-trader/logs');
-                const data = await response.json();
+                // Get logs from strategy process with timeout
+                const data = await fetchWithTimeout('/api/live-trader/logs', {
+                    credentials: 'include'
+                }, 15000); // 15 second timeout for logs (longer since it may read files)
                 
                 const logsContainer = document.getElementById('logsContainer');
                 if (!logsContainer) return;
@@ -1557,7 +1657,18 @@
                     }
                 }
             } catch (error) {
-                console.error('Error loading logs:', error);
+                // Only log unexpected errors - suppress common timeout/network errors
+                if (error.name !== 'AbortError' && 
+                    !error.message.includes('timeout') && 
+                    !error.message.includes('JSON') &&
+                    !error.message.includes('Unexpected') &&
+                    !error.message.includes('too long') &&
+                    !error.message.includes('Server') &&
+                    !error.message.includes('unavailable') &&
+                    !error.message.includes('Network')) {
+                    console.warn('[LOGS] Error loading logs:', error.message);
+                }
+                // Don't clear existing logs on error - keep showing what we have
             }
         }
 
