@@ -8,13 +8,33 @@ import json
 import os
 import sys
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import threading
 import time
 import logging
 import secrets
 import base64
 from typing import Tuple, Optional
+
+# IST Timezone for consistent timestamps
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def get_ist_time():
+    """Get current time in IST timezone"""
+    return datetime.now(IST)
+
+class ISTFormatter(logging.Formatter):
+    """Formatter that uses IST timezone for timestamps"""
+    def formatTime(self, record, datefmt=None):
+        """Override formatTime to use IST"""
+        ct = get_ist_time()
+        if datefmt:
+            s = ct.strftime(datefmt)
+        else:
+            s = ct.strftime('%Y-%m-%d %H:%M:%S')
+            # Add milliseconds
+            s = f"{s},{int(record.msecs):03d}"
+        return s
 
 # Disable Azure Monitor OpenTelemetry if not properly configured
 # This prevents "Bad Request" errors when Application Insights is misconfigured
