@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Optional
 import os
 import json
+import threading
 from pathlib import Path
 
 Base = declarative_base()
@@ -155,9 +156,25 @@ class Candle(Base):
 
 
 class DatabaseManager:
-    """Database connection and session management"""
+    """Database connection and session management (Singleton pattern)"""
+    
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls, db_path: str = None, database_url: str = None):
+        """Singleton pattern: ensure only one instance exists"""
+        if cls._instance is None:
+            with cls._lock:
+                # Double-check locking pattern
+                if cls._instance is None:
+                    cls._instance = super(DatabaseManager, cls).__new__(cls)
+        return cls._instance
     
     def __init__(self, db_path: str = None, database_url: str = None):
+        # Skip initialization if already initialized
+        if hasattr(self, '_initialized'):
+            return
+        
         import logging
         logger = logging.getLogger("database")
         
@@ -213,6 +230,9 @@ class DatabaseManager:
         
         # Create session factory
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+        
+        # Mark as initialized
+        self._initialized = True
         
         logger.info(f"Database connection initialized (s001 tables)")
     

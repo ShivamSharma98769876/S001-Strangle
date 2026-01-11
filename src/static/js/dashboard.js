@@ -5,6 +5,35 @@ let updateInterval;
 let isAuthenticated = false;
 let cumulativePnlChart = null;
 
+// Performance optimization: Request caching
+const requestCache = new Map();
+const CACHE_TTL = 5000; // 5 seconds cache TTL
+
+// Cached fetch with TTL
+async function cachedFetch(url, options = {}) {
+    const cacheKey = `${url}_${JSON.stringify(options)}`;
+    const cached = requestCache.get(cacheKey);
+    const now = Date.now();
+    
+    // Return cached response if still valid
+    if (cached && (now - cached.timestamp) < CACHE_TTL) {
+        return cached.response.clone(); // Clone to allow multiple reads
+    }
+    
+    // Make fresh request
+    const response = await fetch(url, { ...options, credentials: 'include' });
+    
+    // Cache successful responses
+    if (response.ok) {
+        requestCache.set(cacheKey, {
+            response: response.clone(),
+            timestamp: now
+        });
+    }
+    
+    return response;
+}
+
 // Define showAuthModal early so it's available for inline onclick handlers
 window.showAuthModal = function showAuthModal() {
     console.log('[Auth] Attempting to show auth modal');
@@ -334,9 +363,7 @@ async function updateStatus() {
     }
     
     try {
-        const response = await fetch('/api/dashboard/status', {
-            credentials: 'include'
-        });
+        const response = await cachedFetch('/api/dashboard/status');
         if (!response.ok) {
             if (response.status === 401) {
                 // Not authenticated, stop updates
@@ -381,9 +408,7 @@ async function updateTrades() {
         if (showAll) url += 'all=true&';
         if (dateFilter) url += `date=${dateFilter}`;
         
-        const response = await fetch(url, {
-            credentials: 'include'
-        });
+        const response = await cachedFetch(url);
         if (!response.ok) return;
         
         const data = await response.json();
@@ -570,17 +595,19 @@ function startUpdates() {
     stopUpdates();
     updateAll();
     
+    // Optimized: Increase polling interval to reduce server load
+    // Use 30 seconds for dashboard updates (was 10 seconds)
     updateInterval = setInterval(() => {
         if (isAuthenticated) {
             updateAll();
         } else {
             stopUpdates();
         }
-    }, 10000); // Update every 10 seconds
+    }, 30000); // Update every 30 seconds (optimized from 10 seconds)
     
-    // Check connectivity every 15 seconds
+    // Check connectivity every 60 seconds (optimized from 15 seconds)
     checkConnectivity();
-    setInterval(checkConnectivity, 15000);
+    setInterval(checkConnectivity, 60000);
 }
 
 // Stop updates

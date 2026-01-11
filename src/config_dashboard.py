@@ -371,12 +371,12 @@ def check_session_expiration():
             if request.path.startswith('/api/'):
                 return jsonify({
                     'success': False,
-                    'error': 'Authentication required. This endpoint is protected and requires JWT token authentication.',
+                    'error': 'Navigate through main application',
                     'requires_auth': True
                 }), 401
             else:
                 return render_template('auth_required.html', 
-                                     message='Authentication required. This page is protected and requires JWT token authentication. Please authenticate through the main application.'), 401
+                                     message='Navigate through main application'), 401
         
         # Additional check: ensure access token exists
         creds = SaaSSessionManager.get_credentials()
@@ -385,7 +385,7 @@ def check_session_expiration():
             if request.path.startswith('/api/'):
                 return jsonify({
                     'success': False,
-                    'error': 'Invalid session. Access token not found. Please re-authenticate.',
+                    'error': 'Navigate through main application',
                     'requires_auth': True
                 }), 401
             else:
@@ -400,7 +400,12 @@ def check_session_expiration():
 # Global config monitor reference
 config_monitor = None
 
-# Global strategy thread reference
+# Per-session strategy managers: keyed by broker_id + device_id for true isolation
+# Format: {f"{broker_id}_{device_id}": StrategyManager instance}
+_strategy_managers = {}  # Dict[str, 'StrategyManager']
+_strategy_managers_lock = threading.Lock()  # Thread-safe access
+
+# Legacy global variables (kept for backward compatibility, but should use per-session managers)
 strategy_thread = None
 strategy_bot = None
 strategy_process = None
@@ -409,6 +414,87 @@ strategy_running = False
 strategy_output_buffer = []  # List of log lines from subprocess
 strategy_output_lock = threading.Lock()  # Thread-safe access to buffer
 MAX_BUFFER_SIZE = 1000  # Maximum number of lines to keep in buffer
+
+class StrategyManager:
+    """Per-session strategy manager for independent strategy execution per account/device"""
+    def __init__(self, broker_id: str, device_id: str, account_name: str = None):
+        self.broker_id = broker_id
+        self.device_id = device_id
+        self.account_name = account_name or broker_id
+        self.strategy_process = None
+        self.strategy_running = False
+        self.strategy_output_buffer = []
+        self.strategy_output_lock = threading.Lock()
+        self.process_id = None
+        logging.info(f"[STRATEGY MANAGER] Created for broker_id={broker_id}, device_id={device_id}, account={self.account_name}")
+    
+    def is_running(self) -> bool:
+        """Check if strategy is actually running"""
+        if self.strategy_process is None:
+            return False
+        try:
+            poll_result = self.strategy_process.poll()
+            if poll_result is None:
+                return True
+            else:
+                # Process terminated
+                self.strategy_running = False
+                self.strategy_process = None
+                return False
+        except Exception:
+            self.strategy_running = False
+            self.strategy_process = None
+            return False
+    
+    def stop(self):
+        """Stop the strategy process"""
+        if self.strategy_process:
+            try:
+                logging.info(f"[STRATEGY MANAGER] [{self.account_name}] Stopping strategy (PID: {self.process_id})")
+                self.strategy_process.terminate()
+                import time
+                time.sleep(2)
+                if self.strategy_process.poll() is None:
+                    self.strategy_process.kill()
+                self.strategy_process.wait(timeout=3)
+            except Exception as e:
+                logging.error(f"[STRATEGY MANAGER] [{self.account_name}] Error stopping process: {e}")
+                try:
+                    self.strategy_process.kill()
+                except:
+                    pass
+            finally:
+                self.strategy_process = None
+                self.process_id = None
+        self.strategy_running = False
+    
+    def get_logs(self, max_lines: int = 100) -> list:
+        """Get recent logs from buffer"""
+        with self.strategy_output_lock:
+            return self.strategy_output_buffer[-max_lines:] if self.strategy_output_buffer else []
+
+def get_strategy_manager() -> StrategyManager:
+    """Get or create strategy manager for current session (broker_id + device_id)"""
+    broker_id = SaaSSessionManager.get_broker_id()
+    device_id = SaaSSessionManager.get_device_id()
+    
+    if not broker_id:
+        logging.warning("[STRATEGY MANAGER] No broker_id in session")
+        return None
+    
+    # Use composite key for true multi-device isolation
+    manager_key = f"{broker_id}_{device_id}"
+    
+    with _strategy_managers_lock:
+        if manager_key not in _strategy_managers:
+            creds = SaaSSessionManager.get_credentials()
+            account_name = creds.get('full_name') or creds.get('broker_id') or broker_id
+            _strategy_managers[manager_key] = StrategyManager(
+                broker_id=broker_id,
+                device_id=device_id,
+                account_name=account_name
+            )
+        return _strategy_managers[manager_key]
 
 # Global Kite client for authentication (can be used independently)
 kite_client_global = None
@@ -1533,11 +1619,22 @@ def live_trader_page():
 @app.route('/api/live-trader/logs', methods=['GET'])
 @require_authentication
 def get_live_trader_logs():
-    """Get Live Trader logs"""
+    """Get Live Trader logs for current session"""
     try:
-        global strategy_process
+        # Get per-session strategy manager
+        manager = get_strategy_manager()
+        creds = SaaSSessionManager.get_credentials()
+        account_name = creds.get('full_name') or creds.get('broker_id') or 'Unknown'
+        broker_id = creds.get('broker_id') or SaaSSessionManager.get_broker_id()
         
         logs = []
+        
+        # First, try to get logs from per-session buffer
+        if manager:
+            buffer_logs = manager.get_logs(max_lines=500)
+            if buffer_logs:
+                logs.extend(buffer_logs)
+                logging.debug(f"[LOGS] [{account_name}] Retrieved {len(buffer_logs)} lines from per-session buffer")
         
         # Import environment functions at the start
         from datetime import date
@@ -1573,7 +1670,7 @@ def get_live_trader_logs():
         # Use broker_id for log file matching (multi-user isolation)
         # broker_id is the Zerodha ID and is the primary identifier
         account = broker_id
-        logging.info(f"[LOGS] [broker_id: {broker_id}] Using broker_id from session for log matching (Zerodha ID)")
+        logging.info(f"[LOGS] [{account_name}] [broker_id: {broker_id}] Using broker_id from session for log matching (Zerodha ID)")
         
         # Simplify: Only look for today's log file in format: {broker_id}_{YYYYMONDD}.log
         # Get sanitized broker_id (first name only)
@@ -1613,18 +1710,42 @@ def get_live_trader_logs():
                 os.makedirs(azure_log_dir, exist_ok=True)
                 logging.info(f"[LOGS] Azure environment - checking log directory: {azure_log_dir}")
                 
+                # Verify directory is writable (test write permissions)
+                try:
+                    test_file = os.path.join(azure_log_dir, '.test_write')
+                    with open(test_file, 'w') as f:
+                        f.write('test')
+                    os.remove(test_file)
+                    logging.info(f"[LOGS] Directory is writable: {azure_log_dir}")
+                except Exception as perm_error:
+                    logging.error(f"[LOGS] Directory may not be writable: {azure_log_dir}, error: {perm_error}")
+                
                 # Look for today's log file
                 today_log_path = os.path.join(azure_log_dir, log_filename)
                 if os.path.exists(today_log_path):
                     log_files.append(today_log_path)
-                    logging.info(f"[LOGS] ✓ Found today's log file: {today_log_path}")
+                    file_size = os.path.getsize(today_log_path)
+                    logging.info(f"[LOGS] ✓ Found today's log file: {today_log_path} (size: {file_size} bytes)")
                 else:
                     logging.info(f"[LOGS] Today's log file does not exist: {today_log_path}")
+                    # Check if strategy process is running - if not, that's why no log file exists
+                    if strategy_process is None:
+                        logging.warning(f"[LOGS] Strategy process is not running - log file will be created when strategy starts")
+                    elif strategy_process is not None:
+                        try:
+                            if strategy_process.poll() is None:
+                                logging.info(f"[LOGS] Strategy process is running (PID: {strategy_process.pid}) - log file should be created soon")
+                            else:
+                                logging.warning(f"[LOGS] Strategy process terminated (return code: {strategy_process.returncode}) - may have crashed before creating log file")
+                        except:
+                            pass
                     # List files in directory for debugging
                     try:
                         if os.path.exists(azure_log_dir):
                             all_files = os.listdir(azure_log_dir)
                             logging.info(f"[LOGS] Files in Azure log directory: {all_files}")
+                            if not all_files:
+                                logging.info(f"[LOGS] Directory is empty - strategy may not have started logging yet")
                     except Exception as e:
                         logging.warning(f"[LOGS] Could not list Azure log directory: {e}")
         
@@ -1643,16 +1764,30 @@ def get_live_trader_logs():
         else:
             all_lines = []
             logging.info(f"[LOGS] No subprocess output in buffer yet (strategy may be starting or not running)")
-            # Check if strategy process exists
+            # Check if strategy process exists and provide detailed diagnostics
             if strategy_process is not None:
                 try:
                     poll_result = strategy_process.poll()
                     if poll_result is None:
                         logging.info(f"[LOGS] Strategy process is running (PID: {strategy_process.pid}) but no output in buffer yet")
+                        logging.info(f"[LOGS] Process may still be initializing - logs should appear shortly")
+                        # Check if log file exists but is empty (process just started)
+                        if is_azure_environment() and account:
+                            from environment import sanitize_account_name_for_filename
+                            sanitized_account = sanitize_account_name_for_filename(account)
+                            azure_log_dir = os.path.join('/tmp', sanitized_account, 'logs')
+                            today_log_path = os.path.join(azure_log_dir, log_filename)
+                            if os.path.exists(today_log_path):
+                                file_size = os.path.getsize(today_log_path)
+                                logging.info(f"[LOGS] Log file exists but may be empty (size: {file_size} bytes)")
                     else:
                         logging.warning(f"[LOGS] Strategy process terminated (return code: {poll_result}) - no output captured")
+                        logging.warning(f"[LOGS] Strategy may have crashed - check error logs or restart the strategy")
                 except Exception as e:
                     logging.warning(f"[LOGS] Could not check strategy process status: {e}")
+            else:
+                logging.warning(f"[LOGS] Strategy process is None - strategy may not be running")
+                logging.warning(f"[LOGS] Start the strategy first to generate logs")
         
         # THEN: Check log files (as fallback/persistent storage)
         if not log_files:
@@ -1807,10 +1942,34 @@ def get_live_trader_logs():
                 if search_info not in unique_logs:
                     unique_logs.insert(1, search_info)
         else:
-            # No log files found - add helpful message
-            no_logs_msg = f"[LOG SETUP] No log files found yet. Logs will appear here once the strategy starts running."
-            if no_logs_msg not in unique_logs:
-                unique_logs.insert(0, no_logs_msg)
+            # No log files found - add helpful message with strategy status
+            strategy_status_msg = ""
+            if strategy_process is None:
+                strategy_status_msg = "[LOG SETUP] Strategy process is not running. Please start the strategy to generate logs."
+            else:
+                try:
+                    poll_result = strategy_process.poll()
+                    if poll_result is None:
+                        strategy_status_msg = f"[LOG SETUP] Strategy process is running (PID: {strategy_process.pid}) but no logs yet. Logs should appear shortly."
+                    else:
+                        strategy_status_msg = f"[LOG SETUP] Strategy process terminated (return code: {poll_result}). The strategy may have crashed. Please restart the strategy."
+                except:
+                    strategy_status_msg = "[LOG SETUP] Strategy process status unknown. Please check if the strategy is running."
+            
+            if not strategy_status_msg:
+                strategy_status_msg = "[LOG SETUP] No log files found yet. Logs will appear here once the strategy starts running."
+            
+            if strategy_status_msg not in unique_logs:
+                unique_logs.insert(0, strategy_status_msg)
+            
+            # Also add directory info for Azure
+            if is_azure_environment() and account:
+                from environment import sanitize_account_name_for_filename
+                sanitized_account = sanitize_account_name_for_filename(account)
+                azure_log_dir = os.path.join('/tmp', sanitized_account, 'logs')
+                dir_info = f"[LOG SETUP] Log directory: {azure_log_dir}"
+                if dir_info not in unique_logs:
+                    unique_logs.insert(1, dir_info)
         
         response_data['logs'] = unique_logs[-500:]
         return jsonify(response_data)
@@ -1836,45 +1995,32 @@ def get_live_trader_logs():
 @app.route('/api/live-trader/status', methods=['GET'])
 @require_authentication
 def live_trader_status():
-    """Get Live Trader engine status"""
+    """Get Live Trader engine status for current session"""
     try:
-        global strategy_process, strategy_running
+        # Get per-session strategy manager
+        manager = get_strategy_manager()
+        if not manager:
+            return jsonify({
+                'running': False,
+                'strategy_running': False,
+                'error': 'No session found'
+            }), 401
         
         # Check actual process status
-        actual_running = False
-        if strategy_process is not None:
-            try:
-                poll_result = strategy_process.poll()
-                if poll_result is None:
-                    # Process is still running
-                    actual_running = True
-                    logging.debug(f"[LIVE TRADER STATUS] Process is running (PID: {strategy_process.pid})")
-                else:
-                    # Process has terminated
-                    logging.info(f"[LIVE TRADER STATUS] Process terminated with return code: {poll_result}")
-                    strategy_running = False
-                    strategy_process = None
-                    actual_running = False
-            except Exception as poll_error:
-                # Process object might be invalid
-                logging.warning(f"[LIVE TRADER STATUS] Error polling process: {poll_error}")
-                strategy_running = False
-                strategy_process = None
-                actual_running = False
-        else:
-            # No process object, definitely not running
-            actual_running = False
-            strategy_running = False
+        actual_running = manager.is_running()
+        manager.strategy_running = actual_running
         
-        # Update strategy_running flag to match actual state
-        strategy_running = actual_running
+        creds = SaaSSessionManager.get_credentials()
+        account_name = creds.get('full_name') or creds.get('broker_id') or 'Unknown'
         
-        logging.debug(f"[LIVE TRADER STATUS] Returning status - running: {actual_running}, strategy_running: {strategy_running}")
+        logging.debug(f"[LIVE TRADER STATUS] [{account_name}] Status - running: {actual_running}")
         
         return jsonify({
             'running': actual_running,
-            'strategy_running': strategy_running,
-            'process_id': strategy_process.pid if (strategy_process and actual_running) else None
+            'strategy_running': actual_running,
+            'process_id': manager.process_id if actual_running else None,
+            'account_name': account_name,
+            'broker_id': manager.broker_id
         })
     except Exception as e:
         logging.error(f"[LIVE TRADER STATUS] Error: {e}")
@@ -1889,49 +2035,38 @@ def live_trader_status():
 @app.route('/api/live-trader/start', methods=['POST'])
 @require_authentication
 def start_live_trader():
-    """Start Live Trader by running Straddle10PointswithSL-Limit.py"""
+    """Start Live Trader by running Straddle10PointswithSL-Limit.py - Per-session isolated"""
     try:
-        global strategy_process, strategy_running, kite_client_global, kite_api_key, kite_api_secret
+        # Get per-session strategy manager
+        manager = get_strategy_manager()
+        if not manager:
+            return jsonify({
+                'success': False,
+                'error': 'No session found. Please authenticate first.'
+            }), 401
         
-        # CRITICAL: Load credentials from session first
+        # Get credentials from session
         creds = SaaSSessionManager.get_credentials()
-        if creds.get('api_key'):
-            kite_api_key = creds.get('api_key')
-        if creds.get('api_secret'):
-            kite_api_secret = creds.get('api_secret')
-        if creds.get('access_token') and not kite_client_global:
-            try:
-                from src.kite_client import KiteClient
-            except ImportError:
-                from kite_client import KiteClient
-            kite_client_global = KiteClient(
-                kite_api_key,
-                kite_api_secret,
-                access_token=creds.get('access_token'),
-                account=creds.get('full_name', 'DASHBOARD')
-            )
+        broker_id = creds.get('broker_id') or SaaSSessionManager.get_broker_id()
+        account_name = creds.get('full_name') or creds.get('broker_id') or broker_id or 'TRADING_ACCOUNT'
         
-        # Check if process is actually running, not just the flag
-        if strategy_running:
-            # Verify the process is actually still running
-            if strategy_process is not None:
-                poll_result = strategy_process.poll()
-                if poll_result is None:
-                    # Process is still running
-                    logging.warning("[LIVE TRADER] Strategy process is still running (PID: {})".format(strategy_process.pid))
-                    return jsonify({
-                        'success': False,
-                        'error': 'Strategy is already running'
-                    }), 400
-                else:
-                    # Process has terminated but flag wasn't reset
-                    logging.warning("[LIVE TRADER] Strategy process terminated (return code: {}) but flag was still True. Resetting flag.".format(poll_result))
-                    strategy_running = False
-                    strategy_process = None
-            else:
-                # Flag is True but process is None - reset flag
-                logging.warning("[LIVE TRADER] Strategy flag is True but process is None. Resetting flag.")
-                strategy_running = False
+        # Update manager account name if needed
+        if account_name != manager.account_name:
+            manager.account_name = account_name
+        
+        # Check if strategy is already running for this session
+        if manager.is_running():
+            logging.warning(f"[LIVE TRADER] [{account_name}] Strategy is already running (PID: {manager.process_id})")
+            return jsonify({
+                'success': False,
+                'error': f'Strategy is already running for account {account_name}',
+                'account_name': account_name,
+                'broker_id': broker_id
+            }), 400
+        
+        # Stop any existing process (cleanup)
+        if manager.strategy_process:
+            manager.stop()
         
         data = request.get_json()
         call_quantity = data.get('callQuantity')
@@ -1966,39 +2101,13 @@ def start_live_trader():
                 'error': f'Put Quantity must be a multiple of {LOT_SIZE}. You entered {put_quantity}. Nearest valid: {(put_quantity // LOT_SIZE) * LOT_SIZE}'
             }), 400
         
-        # CRITICAL: Load credentials from session first (in case global client is not set)
-        creds = SaaSSessionManager.get_credentials()
-        if creds.get('api_key'):
-            kite_api_key = creds.get('api_key')
-        if creds.get('api_secret'):
-            kite_api_secret = creds.get('api_secret')
-        if creds.get('access_token') and not kite_client_global:
-            try:
-                from src.kite_client import KiteClient
-            except ImportError:
-                from kite_client import KiteClient
-            kite_client_global = KiteClient(
-                kite_api_key,
-                kite_api_secret,
-                access_token=creds.get('access_token'),
-                account=creds.get('full_name', 'DASHBOARD')
-            )
+        # Get credentials from session
+        api_key = creds.get('api_key')
+        api_secret = creds.get('api_secret')
+        access_token = creds.get('access_token')
         
-        # Check if authenticated
-        if not kite_client_global or not hasattr(kite_client_global, 'kite'):
-            return jsonify({
-                'success': False,
-                'error': 'Not authenticated. Please authenticate first.'
-            }), 401
-        
-        # Get credentials from authenticated client
-        api_key = kite_client_global.api_key if kite_client_global else kite_api_key
-        # Use api_secret from kite_client_global, but fall back to global kite_api_secret if empty
-        api_secret = kite_client_global.api_secret or kite_api_secret or ''
-        access_token = kite_client_global.access_token if kite_client_global else creds.get('access_token', '')
-        
-        # Log credential status for debugging
-        logging.info(f"[LIVE TRADER] Credentials check - api_key: {'SET' if api_key else 'NOT SET'}, api_secret: {'SET' if api_secret else 'NOT SET'}, access_token: {'SET' if access_token else 'NOT SET'}")
+        # Log credential status for debugging with account name
+        logging.info(f"[LIVE TRADER] [{account_name}] Credentials check - api_key: {'SET' if api_key else 'NOT SET'}, api_secret: {'SET' if api_secret else 'NOT SET'}, access_token: {'SET' if access_token else 'NOT SET'}, broker_id: {broker_id}")
         
         # Validate that we have all required credentials
         if not api_key:
@@ -2022,11 +2131,8 @@ def start_live_trader():
                 'error': 'Access token not available. Please authenticate first.'
             }), 401
         
-        # Get account name from authenticated client (use account_holder_name if available)
-        # CRITICAL: Use the account name that was used when starting the strategy for log matching
-        global account_holder_name, strategy_account_name
-        # Prefer strategy_account_name (account used when starting) for log retrieval
-        account = strategy_account_name or account_holder_name or getattr(kite_client_global, 'account', 'TRADING_ACCOUNT') or 'TRADING_ACCOUNT'
+        # Use account name from session (already set above)
+        account = account_name
         
         # Get the strategy file path
         # Use the correct path: PythonProgram\Strangle10Points\src\Straddle10PointswithSL-Limit.py
@@ -2069,32 +2175,21 @@ def start_live_trader():
         # 5. Call Quantity (line 2504)
         # 6. Put Quantity (line 2505)
         
-        # CRITICAL: Get broker_id from session BEFORE starting thread (while still in Flask request context)
-        broker_id = SaaSSessionManager.get_broker_id()
-        if not broker_id:
-            broker_id = account  # Fallback to account if broker_id not available
-        
         # Use a threading event to signal when process is created
         process_ready = threading.Event()
         process_error = [None]  # Use list to allow modification from inner function
         
-        def run_strategy(broker_id_param):
-            global strategy_process, strategy_running, strategy_output_buffer
+        def run_strategy(manager_ref, account_name_param, broker_id_param):
+            """Run strategy in background thread with per-session manager"""
             try:
-                strategy_running = True
+                manager_ref.strategy_running = True
                 
                 # Clear output buffer when starting new strategy
-                with strategy_output_lock:
-                    strategy_output_buffer = []
-                    logging.info(f"[LIVE TRADER] Cleared output buffer for new strategy run")
+                with manager_ref.strategy_output_lock:
+                    manager_ref.strategy_output_buffer = []
+                    logging.info(f"[LIVE TRADER] [{account_name_param}] Cleared output buffer for new strategy run")
                 
-                # Use the broker_id passed as parameter (captured before thread started)
-                broker_id = broker_id_param
-                
-                # Store the broker_id used for this strategy run (for log retrieval)
-                global strategy_account_name
-                strategy_account_name = broker_id  # Use broker_id for log file matching
-                logging.info(f"[LIVE TRADER] Starting strategy with broker_id: {broker_id} (Zerodha ID - will be used for log file matching)")
+                logging.info(f"[LIVE TRADER] [{account_name_param}] Starting strategy with broker_id: {broker_id_param} (Zerodha ID - will be used for log file matching)")
                 
                 # Prepare input string for stdin (matching the exact order of input() calls)
                 # Use broker_id as account identifier for consistency
@@ -2121,7 +2216,7 @@ def start_live_trader():
                     if broker_id:
                         env['BROKER_ID'] = broker_id
                         env['ZERODHA_ID'] = broker_id  # Alias for clarity
-                    strategy_process = subprocess.Popen(
+                    manager_ref.strategy_process = subprocess.Popen(
                         [sys.executable, '-u', strategy_file],  # -u flag for unbuffered output
                         stdin=subprocess.PIPE,
                         stdout=subprocess.PIPE,
@@ -2132,12 +2227,13 @@ def start_live_trader():
                         bufsize=0  # Unbuffered for real-time output
                     )
                     
-                    logging.info(f"[LIVE TRADER] Process created successfully (PID: {strategy_process.pid})")
+                    manager_ref.process_id = manager_ref.strategy_process.pid
+                    logging.info(f"[LIVE TRADER] [{account_name_param}] Process created successfully (PID: {manager_ref.process_id})")
                     
                     # Send inputs immediately
-                    strategy_process.stdin.write(inputs)
-                    strategy_process.stdin.flush()
-                    strategy_process.stdin.close()
+                    manager_ref.strategy_process.stdin.write(inputs)
+                    manager_ref.strategy_process.stdin.flush()
+                    manager_ref.strategy_process.stdin.close()
                     
                     # Signal that process is ready
                     process_ready.set()
@@ -2145,147 +2241,214 @@ def start_live_trader():
                     # Don't wait for completion - let it run in background
                     # Monitor the process in background
                     def monitor_process():
-                        global strategy_process, strategy_running, strategy_output_buffer
                         # Store local reference to avoid race conditions
-                        proc = strategy_process
+                        proc = manager_ref.strategy_process
                         if proc is None:
                             return
                         
                         try:
                             # Read output in background and store in buffer for real-time display
-                            logging.info(f"[STRATEGY] Monitor thread started, reading subprocess output...")
+                            logging.info(f"[STRATEGY] [{account_name_param}] Monitor thread started, reading subprocess output...")
                             line_count = 0
                             for line in proc.stdout:
                                 line_text = line.strip()
                                 if line_text:  # Only store non-empty lines
                                     line_count += 1
-                                    # Log to dashboard logger
-                                    logging.info(f"[STRATEGY] {line_text}")
+                                    # Log to dashboard logger with account name
+                                    logging.info(f"[STRATEGY] [{account_name_param}] {line_text}")
                                     
                                     # Store in buffer for real-time log display
-                                    with strategy_output_lock:
-                                        strategy_output_buffer.append(line_text)
+                                    with manager_ref.strategy_output_lock:
+                                        manager_ref.strategy_output_buffer.append(line_text)
                                         # Keep buffer size manageable
-                                        if len(strategy_output_buffer) > MAX_BUFFER_SIZE:
-                                            strategy_output_buffer = strategy_output_buffer[-MAX_BUFFER_SIZE:]
+                                        if len(manager_ref.strategy_output_buffer) > MAX_BUFFER_SIZE:
+                                            manager_ref.strategy_output_buffer = manager_ref.strategy_output_buffer[-MAX_BUFFER_SIZE:]
                                     
                                     # Log every 10 lines to confirm we're capturing output
                                     if line_count % 10 == 0:
-                                        logging.info(f"[STRATEGY] Captured {line_count} lines so far, buffer size: {len(strategy_output_buffer)}")
+                                        logging.info(f"[STRATEGY] [{account_name_param}] Captured {line_count} lines so far, buffer size: {len(manager_ref.strategy_output_buffer)}")
                             
-                            logging.info(f"[STRATEGY] Monitor thread finished, captured {line_count} total lines")
+                            logging.info(f"[STRATEGY] [{account_name_param}] Monitor thread finished, captured {line_count} total lines")
                         except Exception as e:
-                            logging.error(f"[STRATEGY] Monitor error: {e}")
+                            logging.error(f"[STRATEGY] [{account_name_param}] Monitor error: {e}")
                             import traceback
-                            logging.error(f"[STRATEGY] Monitor traceback: {traceback.format_exc()}")
+                            logging.error(f"[STRATEGY] [{account_name_param}] Monitor traceback: {traceback.format_exc()}")
                         finally:
                             # Check if process has terminated
                             try:
                                 if proc is not None and proc.poll() is not None:
                                     returncode = proc.returncode
-                                    logging.info(f"[STRATEGY] Process terminated with return code: {returncode}")
-                                    strategy_running = False
+                                    logging.info(f"[STRATEGY] [{account_name_param}] Process terminated with return code: {returncode}")
+                                    manager_ref.strategy_running = False
                                     # Only set to None if it's still the same process
-                                    if strategy_process == proc:
-                                        strategy_process = None
+                                    if manager_ref.strategy_process == proc:
+                                        manager_ref.strategy_process = None
+                                        manager_ref.process_id = None
                             except Exception as e:
-                                logging.warning(f"[STRATEGY] Error checking process status: {e}")
-                                strategy_running = False
-                                if strategy_process == proc:
-                                    strategy_process = None
+                                logging.warning(f"[STRATEGY] [{account_name_param}] Error checking process status: {e}")
+                                manager_ref.strategy_running = False
+                                if manager_ref.strategy_process == proc:
+                                    manager_ref.strategy_process = None
+                                    manager_ref.process_id = None
                     
                     monitor_thread = threading.Thread(target=monitor_process, daemon=True)
                     monitor_thread.start()
                     
                 except Exception as popen_error:
                     error_msg = f"Failed to create subprocess: {popen_error}"
-                    logging.error(f"[LIVE TRADER] {error_msg}")
+                    logging.error(f"[LIVE TRADER] [{account_name_param}] {error_msg}")
                     import traceback
-                    logging.error(f"[LIVE TRADER] Traceback: {traceback.format_exc()}")
+                    logging.error(f"[LIVE TRADER] [{account_name_param}] Traceback: {traceback.format_exc()}")
                     process_error[0] = error_msg
-                    strategy_running = False
-                    strategy_process = None
+                    manager_ref.strategy_running = False
+                    manager_ref.strategy_process = None
+                    manager_ref.process_id = None
                     process_ready.set()  # Signal even on error so main thread can check
                 
             except Exception as e:
                 error_msg = f"Error running strategy: {e}"
-                logging.error(f"[LIVE TRADER] {error_msg}")
+                logging.error(f"[LIVE TRADER] [{account_name_param}] {error_msg}")
                 import traceback
-                logging.error(f"[LIVE TRADER] Traceback: {traceback.format_exc()}")
+                logging.error(f"[LIVE TRADER] [{account_name_param}] Traceback: {traceback.format_exc()}")
                 process_error[0] = error_msg
-                strategy_running = False
-                if strategy_process:
+                manager_ref.strategy_running = False
+                if manager_ref.strategy_process:
                     try:
-                        strategy_process.terminate()
+                        manager_ref.strategy_process.terminate()
                     except:
                         pass
-                strategy_process = None
+                manager_ref.strategy_process = None
+                manager_ref.process_id = None
                 process_ready.set()  # Signal even on error so main thread can check
         
-        # Pass broker_id as argument to the thread function
-        strategy_thread = threading.Thread(target=run_strategy, args=(broker_id,), daemon=True)
+        # Start strategy in background thread with manager reference
+        strategy_thread = threading.Thread(target=run_strategy, args=(manager, account_name, broker_id), daemon=True)
         strategy_thread.start()
         
         # Wait for process to be created (with timeout)
         if process_ready.wait(timeout=3.0):
             # Check if there was an error
             if process_error[0]:
-                strategy_running = False
-                logging.error(f"[LIVE TRADER] Strategy process creation failed: {process_error[0]}")
+                manager.strategy_running = False
+                logging.error(f"[LIVE TRADER] [{account_name}] Strategy process creation failed: {process_error[0]}")
                 return jsonify({
                     'success': False,
-                    'error': f'Failed to start strategy process: {process_error[0]}'
+                    'error': f'Failed to start strategy process: {process_error[0]}',
+                    'account_name': account_name,
+                    'broker_id': broker_id
                 }), 500
             
             # Check if process started successfully
-            if strategy_process is None:
-                strategy_running = False
-                logging.error("[LIVE TRADER] Strategy process is None after creation")
+            if manager.strategy_process is None:
+                manager.strategy_running = False
+                logging.error(f"[LIVE TRADER] [{account_name}] Strategy process is None after creation")
                 return jsonify({
                     'success': False,
-                    'error': 'Failed to start strategy process - process is None'
+                    'error': 'Failed to start strategy process - process is None',
+                    'account_name': account_name,
+                    'broker_id': broker_id
                 }), 500
         else:
             # Timeout waiting for process
-            strategy_running = False
-            logging.error("[LIVE TRADER] Timeout waiting for strategy process to start")
+            manager.strategy_running = False
+            logging.error(f"[LIVE TRADER] [{account_name}] Timeout waiting for strategy process to start")
             return jsonify({
                 'success': False,
-                'error': 'Timeout waiting for strategy process to start. Please check logs for details.'
+                'error': 'Timeout waiting for strategy process to start. Please check logs for details.',
+                'account_name': account_name,
+                'broker_id': broker_id
             }), 500
         
         # Check if process has already terminated with error
-        if strategy_process is not None and strategy_process.poll() is not None:
-            returncode = strategy_process.returncode
-            strategy_running = False
+        if manager.strategy_process is not None and manager.strategy_process.poll() is not None:
+            returncode = manager.strategy_process.returncode
+            manager.strategy_running = False
             error_msg = f'Strategy process exited immediately with code {returncode}'
-            logging.error(f"[LIVE TRADER] {error_msg}")
+            logging.error(f"[LIVE TRADER] [{account_name}] {error_msg}")
             return jsonify({
                 'success': False,
-                'error': error_msg
+                'error': error_msg,
+                'account_name': account_name,
+                'broker_id': broker_id
             }), 500
         
         # Process started successfully
-        logging.info("[LIVE TRADER] Strategy process started successfully")
+        logging.info(f"[LIVE TRADER] [{account_name}] Strategy process started successfully (PID: {manager.process_id})")
         return jsonify({
             'success': True,
-            'message': 'Live Trader started successfully',
-            'process_id': strategy_process.pid if strategy_process else None
+            'message': f'Live Trader started successfully for account {account_name}',
+            'process_id': manager.process_id,
+            'account_name': account_name,
+            'broker_id': broker_id
         })
         
     except Exception as e:
-        logging.error(f"[LIVE TRADER] Error starting Live Trader: {e}")
+        creds = SaaSSessionManager.get_credentials()
+        account_name = creds.get('full_name') or creds.get('broker_id') or 'Unknown'
+        logging.error(f"[LIVE TRADER] [{account_name}] Error starting Live Trader: {e}")
         import traceback
-        logging.error(f"[LIVE TRADER] Traceback: {traceback.format_exc()}")
+        logging.error(f"[LIVE TRADER] [{account_name}] Traceback: {traceback.format_exc()}")
         return jsonify({
             'success': False,
-            'error': f'Failed to start Live Trader: {str(e)}'
+            'error': f'Failed to start Live Trader: {str(e)}',
+            'account_name': account_name
+        }), 500
+
+@app.route('/api/live-trader/stop', methods=['POST'])
+@require_authentication
+def stop_live_trader():
+    """Stop Live Trader for current session"""
+    try:
+        # Get per-session strategy manager
+        manager = get_strategy_manager()
+        if not manager:
+            return jsonify({
+                'success': False,
+                'error': 'No session found. Please authenticate first.'
+            }), 401
+        
+        creds = SaaSSessionManager.get_credentials()
+        account_name = creds.get('full_name') or creds.get('broker_id') or 'Unknown'
+        
+        # Check if strategy is running
+        if not manager.is_running():
+            return jsonify({
+                'success': False,
+                'error': f'Strategy is not running for account {account_name}',
+                'account_name': account_name
+            }), 400
+        
+        logging.info(f"[LIVE TRADER] [{account_name}] Stopping strategy (PID: {manager.process_id})")
+        
+        # Stop the strategy
+        manager.stop()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Strategy stopped successfully for account {account_name}',
+            'account_name': account_name,
+            'broker_id': manager.broker_id
+        })
+        
+    except Exception as e:
+        creds = SaaSSessionManager.get_credentials()
+        account_name = creds.get('full_name') or creds.get('broker_id') or 'Unknown'
+        logging.error(f"[LIVE TRADER] [{account_name}] Error stopping strategy: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'account_name': account_name
         }), 500
 
 @app.route('/api/strategy/stop', methods=['POST'])
 def stop_strategy():
-    """Stop the trading strategy"""
+    """Stop the trading strategy (legacy endpoint - redirects to per-session stop)"""
     try:
+        # Check if authenticated, if so use per-session manager
+        if SaaSSessionManager.is_authenticated():
+            return stop_live_trader()
+        
+        # Legacy global stop (for backward compatibility)
         global strategy_bot, strategy_process, strategy_running
         
         # Check actual process status
@@ -2836,32 +2999,6 @@ def set_access_token():
             'success': False,
             'error': str(e)
         }), 500
-
-# Authentication decorator for routes that require JWT token
-def require_authentication(f):
-    """Decorator to require authentication for routes"""
-    from functools import wraps
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not SaaSSessionManager.is_authenticated():
-            return jsonify({
-                'success': False,
-                'error': 'JWT token not associated. Please navigate through main application to authenticate.',
-                'requires_auth': True
-            }), 401
-        return f(*args, **kwargs)
-    return decorated_function
-
-def require_authentication_page(f):
-    """Decorator to require authentication for page routes"""
-    from functools import wraps
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not SaaSSessionManager.is_authenticated():
-            return render_template('auth_required.html', 
-                                 message='JWT token not associated. Please navigate through main application to authenticate.'), 401
-        return f(*args, **kwargs)
-    return decorated_function
 
 @app.route('/api/connectivity', methods=['GET'])
 def check_connectivity():
