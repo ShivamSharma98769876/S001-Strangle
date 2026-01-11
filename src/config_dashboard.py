@@ -360,6 +360,17 @@ def check_session_expiration():
     # List of routes that require authentication (especially on cloud)
     protected_routes = ['/live/', '/admin/panel', '/api/live-trader/', '/api/strategy/', '/api/trading/']
     
+    # List of public routes that should NEVER require authentication (used for authentication itself)
+    public_routes = ['/api/auth/', '/health', '/healthz', '/', '/credentials']
+    
+    # Skip authentication check for public routes
+    is_public = any(request.path.startswith(route) for route in public_routes)
+    if is_public:
+        # Still extend session if authenticated, but don't block
+        if SaaSSessionManager.is_authenticated():
+            SaaSSessionManager.extend_session()
+        return None  # Continue to route handler
+    
     # Check if this is a protected route
     is_protected = any(request.path.startswith(route) for route in protected_routes)
     
