@@ -626,6 +626,21 @@
                     </span>
                     {% endif %}
                 </div>
+                <!-- User Info from JWT -->
+                <div class="user-info-jwt" style="display: flex; gap: 16px; align-items: center; margin-left: 20px; padding: 8px 16px; background: var(--bg-color); border-radius: 8px;">
+                    {% if broker_id %}
+                    <span style="font-size: 13px; color: var(--text-secondary);">
+                        <i class="fas fa-id-card" style="color: var(--primary-color);"></i> 
+                        <strong>Broker:</strong> <span id="brokerIdDisplay">{{ broker_id }}</span>
+                    </span>
+                    {% endif %}
+                    {% if user_email %}
+                    <span style="font-size: 13px; color: var(--text-secondary);">
+                        <i class="fas fa-envelope" style="color: var(--success-color);"></i> 
+                        <strong>Email:</strong> <span id="userEmailDisplay">{{ user_email }}</span>
+                    </span>
+                    {% endif %}
+                </div>
             </div>
             <div class="header-controls">
                 <div class="status-indicator" id="connectionStatus">
@@ -644,7 +659,7 @@
                     <i class="fas fa-cog"></i>
                     <span>Engine: Stopped</span>
                 </div>
-                <a href="/" class="header-btn primary">
+                <a href="/" class="header-btn primary" id="backToDashboard">
                     <i class="fas fa-arrow-left"></i> Back to Dashboard
                 </a>
             </div>
@@ -1029,26 +1044,47 @@
         }
 
         // Check authentication before allowing access
+        // NOTE: Server-side authentication is already verified by @require_authentication_page decorator
+        // This client-side check is only for UI updates and additional validation
         async function checkAuthentication() {
             try {
-                const response = await fetch('/api/auth/status');
+                const response = await fetch('/api/auth/status', {
+                    credentials: 'include'  // Include session cookies
+                });
                 const data = await response.json();
                 
                 // CRITICAL: Only allow access if authenticated with access token
                 const isAuthenticated = data.authenticated === true && data.has_access_token === true;
                 
                 if (!isAuthenticated) {
-                    // Show error message and redirect to main dashboard for authentication
-                    alert('Please authenticate first before accessing Live Trader');
-                    window.location.href = '/';
+                    // Server-side should have already blocked access, but handle edge cases
+                    // Use a softer approach - show message and redirect without alert
+                    console.warn('[AUTH] Not authenticated, redirecting to dashboard...');
+                    window.location.replace('/');  // Use replace to avoid back button issues
                     return false;
                 }
+                
+                // Update broker_id and email from auth status if available
+                if (data.broker_id) {
+                    const brokerDisplay = document.getElementById('brokerIdDisplay');
+                    if (brokerDisplay && !brokerDisplay.textContent) {
+                        brokerDisplay.textContent = data.broker_id;
+                    }
+                }
+                if (data.email) {
+                    const emailDisplay = document.getElementById('userEmailDisplay');
+                    if (emailDisplay && !emailDisplay.textContent) {
+                        emailDisplay.textContent = data.email;
+                    }
+                }
+                
                 return true;
             } catch (error) {
                 console.error('[AUTH] Error checking authentication:', error);
-                alert('Unable to verify authentication. Please try again.');
-                window.location.href = '/';
-                return false;
+                // On network error, don't redirect immediately - server has already validated
+                // Just log the error and continue (page was rendered so server approved access)
+                console.warn('[AUTH] Authentication check failed, but server approved access');
+                return true;  // Trust server-side validation
             }
         }
 

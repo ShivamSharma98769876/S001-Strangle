@@ -13,6 +13,8 @@ import threading
 import time
 import logging
 import secrets
+import base64
+from typing import Tuple, Optional
 
 # Disable Azure Monitor OpenTelemetry if not properly configured
 # This prevents "Bad Request" errors when Application Insights is misconfigured
@@ -158,9 +160,9 @@ else:
     logger.info("[SESSION] ✅ Single instance mode: Multiple sessions supported (no Redis needed)")
 
 # Setup file logging (logger already initialized above)
-# Add file handler to existing logger
+# Add file handler to existing logger with IST timezone
 file_handler = logging.FileHandler('dashboard.log', encoding='utf-8')
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+file_handler.setFormatter(ISTFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 logger.addHandler(file_handler)
 
 # Print Azure Blob Storage diagnostic info AFTER health endpoint is registered (lazy loading)
@@ -271,15 +273,154 @@ blob_setup_thread.start()
 
 logger.info("[DASHBOARD] Dashboard application initialized (Azure Blob Storage setup in background)")
 
+# ===== JWT TOKEN VALIDATION FUNCTIONS =====
+# Based on disciplined-Trader implementation for secure SSO token handling
+
+def is_azure_environment() -> bool:
+    """
+    Check if running in Azure cloud environment
+    Returns True if Azure environment variables are present
+    """
+    # Azure App Service sets WEBSITE_SITE_NAME
+    # Azure also sets WEBSITE_INSTANCE_ID
+    return bool(os.getenv('WEBSITE_SITE_NAME') or os.getenv('WEBSITE_INSTANCE_ID'))
+
+
+def decode_jwt_token(token: str) -> Optional[dict]:
+    """
+    Decode JWT token and extract payload
+    JWT format: header.payload.signature (base64url encoded)
+    """
+    try:
+        # Split token into parts
+        parts = token.split('.')
+        if len(parts) != 3:
+            return None
+        
+        # Decode payload (second part)
+        payload = parts[1]
+        
+        # Add padding if needed (base64url may not have padding)
+        padding = 4 - len(payload) % 4
+        if padding != 4:
+            payload += '=' * padding
+        
+        # Replace URL-safe characters
+        payload = payload.replace('-', '+').replace('_', '/')
+        
+        # Decode base64
+        decoded_bytes = base64.b64decode(payload)
+        decoded_json = json.loads(decoded_bytes.decode('utf-8'))
+        
+        return decoded_json
+    except Exception as e:
+        logger.error(f"Error decoding JWT token: {e}")
+        return None
+
+
+def validate_jwt_token_for_cloud(token: str) -> Tuple[bool, Optional[str], Optional[dict]]:
+    """
+    Validate JWT token for cloud access
+    Returns: (is_valid: bool, error_message: str, payload: dict)
+    """
+    if not token:
+        return False, "JWT token is required", None
+    
+    # Decode token
+    payload = decode_jwt_token(token)
+    if not payload:
+        return False, "Invalid JWT token format", None
+    
+    # Check if token is expired (if exp claim exists)
+    try:
+        if 'exp' in payload:
+            exp_time = payload['exp']
+            current_time = time.time()
+            if current_time > exp_time:
+                return False, "JWT token has expired", None
+    except Exception as e:
+        logger.warning(f"Error checking token expiration: {e}")
+    
+    return True, None, payload
+
+
+def require_jwt_token_in_cloud() -> Tuple[bool, Optional[str], Optional[dict]]:
+    """
+    Check if JWT token is required and valid in cloud environment
+    Returns: (is_valid: bool, error_message: str, jwt_payload: dict)
+    
+    This function:
+    1. Checks for JWT token in URL query string or headers
+    2. If found, validates it and stores in Flask session
+    3. On subsequent requests, checks session for stored JWT token
+    4. This allows navigation between pages without losing JWT token
+    """
+    # Only require JWT token in cloud (Azure) environment
+    if not is_azure_environment():
+        return True, None, None
+    
+    # First, check if we have a valid JWT token in session (from previous request)
+    session_token = session.get('jwt_token')
+    if session_token:
+        # Validate the session token
+        is_valid, error_msg, payload = validate_jwt_token_for_cloud(session_token)
+        if is_valid:
+            return True, None, payload
+        # If session token is invalid, clear it and continue to check URL/headers
+        session.pop('jwt_token', None)
+        session.pop('jwt_payload', None)
+    
+    # Check for sso_token in query string OR headers (for flexibility)
+    sso_token = request.args.get('sso_token') or request.headers.get('X-SSO-Token')
+    if not sso_token:
+        main_app_url = os.getenv('MAIN_APP_URL', 'https://a000-main-app-g5f2byheauhyeudv.southindia-01.azurewebsites.net')
+        return False, f"Please Navigate through {main_app_url}", None
+    
+    # Validate the token from URL/headers
+    is_valid, error_msg, payload = validate_jwt_token_for_cloud(sso_token)
+    if not is_valid:
+        main_app_url = os.getenv('MAIN_APP_URL', 'https://a000-main-app-g5f2byheauhyeudv.southindia-01.azurewebsites.net')
+        return False, error_msg or f"Please Navigate through {main_app_url}", None
+    
+    # Store valid JWT token in session for subsequent requests
+    session['jwt_token'] = sso_token
+    if payload:
+        session['jwt_payload'] = payload
+        # Store user info from JWT payload in session for later use
+        if 'email' in payload:
+            session['email'] = payload['email']
+        if 'full_name' in payload:
+            session['full_name'] = payload['full_name']
+        if 'zerodha_client_id' in payload:
+            session['broker_id'] = payload['zerodha_client_id']
+        if 'user_id' in payload:
+            session['user_id'] = payload['user_id']
+    
+    logger.info(f"[JWT] Valid token stored in session for user: {payload.get('email', 'unknown')}")
+    return True, None, payload
+
+
+# ===== END JWT TOKEN VALIDATION FUNCTIONS =====
+
 # Authentication decorator for routes that require JWT token
 def require_authentication(f):
     """Decorator to require authentication for API routes - STRICT on cloud environments"""
     from functools import wraps
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # On cloud/production, enforce strict authentication
+        # On cloud/production, enforce strict authentication including JWT validation
         if IS_PRODUCTION:
-            # Double-check authentication is valid
+            # First, validate JWT token in cloud environment
+            jwt_valid, jwt_error, jwt_payload = require_jwt_token_in_cloud()
+            if not jwt_valid:
+                logging.warning(f"[AUTH] JWT token validation failed for API {request.path} from {request.remote_addr}: {jwt_error}")
+                return jsonify({
+                    'success': False,
+                    'error': jwt_error or 'JWT token required. Please navigate through main application to authenticate.',
+                    'requires_auth': True
+                }), 401
+            
+            # Then check SaaS session authentication
             if not SaaSSessionManager.is_authenticated():
                 logging.warning(f"[AUTH] Unauthorized API access attempt to {request.path} from {request.remote_addr} on cloud environment")
                 return jsonify({
@@ -309,13 +450,33 @@ def require_authentication(f):
     return decorated_function
 
 def require_authentication_page(f):
-    """Decorator to require authentication for page routes"""
+    """Decorator to require authentication for page routes - STRICT for all environments with JWT validation"""
     from functools import wraps
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        # In cloud environment, first validate JWT token
+        if is_azure_environment():
+            jwt_valid, jwt_error, jwt_payload = require_jwt_token_in_cloud()
+            if not jwt_valid:
+                logging.warning(f"[AUTH] JWT token validation failed for page {request.path} from {request.remote_addr}: {jwt_error}")
+                main_app_url = os.getenv('MAIN_APP_URL', 'https://a000-main-app-g5f2byheauhyeudv.southindia-01.azurewebsites.net')
+                return render_template('auth_required.html', 
+                                     message=jwt_error or f'JWT token required. Please navigate through {main_app_url}',
+                                     main_app_url=main_app_url), 401
+        
+        # STRICT authentication check for all environments (local and cloud)
         if not SaaSSessionManager.is_authenticated():
+            logging.warning(f"[AUTH] Unauthorized page access attempt to {request.path} from {request.remote_addr}")
             return render_template('auth_required.html', 
                                  message='JWT token not associated. Please navigate through main application to authenticate.'), 401
+        
+        # Additional check: ensure access token exists in session
+        creds = SaaSSessionManager.get_credentials()
+        if not creds.get('access_token'):
+            logging.warning(f"[AUTH] Missing access token for page {request.path} from {request.remote_addr}")
+            return render_template('auth_required.html', 
+                                 message='Invalid session. Access token not found. Please re-authenticate through the main application.'), 401
+        
         return f(*args, **kwargs)
     return decorated_function
 
@@ -376,6 +537,24 @@ def check_session_expiration():
     
     # On cloud/production, strictly enforce authentication for protected routes
     if IS_PRODUCTION and is_protected:
+        # First, validate JWT token in cloud environment
+        jwt_valid, jwt_error, jwt_payload = require_jwt_token_in_cloud()
+        if not jwt_valid:
+            logging.warning(f"[AUTH] JWT token validation failed for {request.path} from {request.remote_addr}: {jwt_error}")
+            main_app_url = os.getenv('MAIN_APP_URL', 'https://a000-main-app-g5f2byheauhyeudv.southindia-01.azurewebsites.net')
+            if request.path.startswith('/api/'):
+                return jsonify({
+                    'success': False,
+                    'error': jwt_error or f'Please Navigate through {main_app_url}',
+                    'requires_auth': True,
+                    'main_app_url': main_app_url
+                }), 401
+            else:
+                return render_template('auth_required.html', 
+                                     message=jwt_error or f'Please Navigate through {main_app_url}',
+                                     main_app_url=main_app_url), 401
+        
+        # Then check SaaS session authentication
         if not SaaSSessionManager.is_authenticated():
             logging.warning(f"[AUTH] Unauthorized access attempt to protected route {request.path} from {request.remote_addr} on cloud")
             # Return JSON for API routes, HTML for page routes
@@ -1589,14 +1768,24 @@ def live_trader_page():
         # Get credentials from session ONCE (optimized - no duplicate calls)
         creds = SaaSSessionManager.get_credentials()
         
-        # Quick authentication check (decorator already validated, but double-check for cloud)
-        if IS_PRODUCTION and not creds.get('access_token'):
-            logging.warning(f"[LIVE TRADER] Unauthorized access attempt from {request.remote_addr} on cloud - missing access token")
+        # STRICT authentication check for both local and cloud
+        if not creds.get('access_token'):
+            logging.warning(f"[LIVE TRADER] Unauthorized access attempt from {request.remote_addr} - missing access token")
             return render_template('auth_required.html', 
                                  message='Authentication required. Access token not found. Please authenticate through the main application.'), 401
         
+        # Verify session is authenticated (double-check)
+        if not SaaSSessionManager.is_authenticated():
+            logging.warning(f"[LIVE TRADER] Session not authenticated from {request.remote_addr}")
+            return render_template('auth_required.html', 
+                                 message='Session expired or invalid. Please re-authenticate through the main application.'), 401
+        
         # Get account name (optimized - single call)
         account_name_display = creds.get('full_name') or creds.get('account_name') or 'Trading Account'
+        
+        # Get broker_id (Zerodha client ID) and email from JWT/session
+        broker_id = creds.get('broker_id') or creds.get('api_key', '')  # broker_id is Zerodha client ID
+        user_email = creds.get('email') or ''  # Email from JWT
         
         # Sync global variables from session (lazy - only if needed)
         global account_holder_name, kite_api_key, kite_api_secret, kite_client_global
@@ -1621,8 +1810,11 @@ def live_trader_page():
                     account=account_name_display
                 )
         
-        # Render template immediately (no database initialization here)
-        return render_template('live_trader.html', account_holder_name=account_name_display)
+        # Render template with account holder name, broker_id (Zerodha ID), and email from JWT
+        return render_template('live_trader.html', 
+                              account_holder_name=account_name_display,
+                              broker_id=broker_id,
+                              user_email=user_email)
     except Exception as e:
         logging.error(f"[LIVE TRADER] Error loading page: {e}")
         return f"Error loading Live Trader page: {str(e)}", 500

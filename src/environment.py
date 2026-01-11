@@ -7,8 +7,36 @@ import logging
 from pathlib import Path
 import io
 import threading
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
 import sys
+
+# ============================================================================
+# IST TIMEZONE CONFIGURATION
+# ============================================================================
+# India Standard Time (IST) is UTC+5:30
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def get_ist_time():
+    """Get current time in IST timezone"""
+    return datetime.now(IST)
+
+def format_ist_time(dt=None):
+    """Format datetime in IST format: hh:mm:ss AM/PM"""
+    if dt is None:
+        dt = get_ist_time()
+    elif dt.tzinfo is None:
+        # If no timezone, assume UTC and convert to IST
+        dt = dt.replace(tzinfo=timezone.utc).astimezone(IST)
+    return dt.strftime('%I:%M:%S %p').lower()
+
+def format_ist_datetime(dt=None):
+    """Format datetime in IST format: YYYY-MM-DD hh:mm:ss"""
+    if dt is None:
+        dt = get_ist_time()
+    elif dt.tzinfo is None:
+        # If no timezone, assume UTC and convert to IST
+        dt = dt.replace(tzinfo=timezone.utc).astimezone(IST)
+    return dt.strftime('%Y-%m-%d %H:%M:%S')
 
 # ============================================================================
 # AZURE BLOB STORAGE CONFIGURATION
@@ -22,9 +50,24 @@ import sys
 # 
 # These values are loaded from src.config which reads from environment variables
 
-# Safe formatter that handles Unicode encoding errors gracefully
-class SafeFormatter(logging.Formatter):
-    """Formatter that safely handles Unicode characters"""
+# Safe formatter that handles Unicode encoding errors gracefully and uses IST timezone
+class ISTFormatter(logging.Formatter):
+    """Formatter that uses IST timezone for timestamps"""
+    converter = lambda *args: get_ist_time().timetuple()
+    
+    def formatTime(self, record, datefmt=None):
+        """Override formatTime to use IST"""
+        ct = get_ist_time()
+        if datefmt:
+            s = ct.strftime(datefmt)
+        else:
+            s = ct.strftime('%Y-%m-%d %H:%M:%S')
+            # Add milliseconds
+            s = f"{s},{int(record.msecs):03d}"
+        return s
+
+class SafeFormatter(ISTFormatter):
+    """Formatter that safely handles Unicode characters and uses IST timezone"""
     def format(self, record):
         try:
             return super().format(record)
@@ -37,8 +80,9 @@ class SafeFormatter(logging.Formatter):
                 record.msg = safe_msg
                 return super().format(record)
             except Exception:
-                # Last resort: return basic message
-                return f"{record.levelname} - {record.name} - {record.getMessage()}"
+                # Last resort: return basic message with IST time
+                ist_time = format_ist_datetime()
+                return f"{ist_time} - {record.levelname} - {record.name} - {record.getMessage()}"
 
 def is_azure_environment():
     """

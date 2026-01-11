@@ -17,7 +17,7 @@ if parent_dir not in sys.path:
 from config import *  # Import all configuration parameters
 
 # Import environment detection and logging utilities
-from environment import is_azure_environment, setup_logging, get_config_value, sanitize_account_name_for_filename
+from environment import is_azure_environment, setup_logging, get_config_value, sanitize_account_name_for_filename, get_ist_time, format_ist_time, IST
 
 # Import config monitoring system
 from config_monitor import initialize_config_monitor, start_config_monitoring, stop_config_monitoring, get_config_monitor
@@ -59,8 +59,24 @@ kite.set_access_token(request_token)
 # Setup logging to file and console with Unicode handling
 import sys
 
-# Create a custom formatter that handles Unicode gracefully
-class SafeFormatter(logging.Formatter):
+# Create a custom formatter that handles Unicode gracefully and uses IST timezone
+class ISTFormatter(logging.Formatter):
+    """Formatter that uses IST timezone for timestamps"""
+    converter = lambda *args: get_ist_time().timetuple()
+    
+    def formatTime(self, record, datefmt=None):
+        """Override formatTime to use IST"""
+        ct = get_ist_time()
+        if datefmt:
+            s = ct.strftime(datefmt)
+        else:
+            s = ct.strftime('%Y-%m-%d %H:%M:%S')
+            # Add milliseconds
+            s = f"{s},{int(record.msecs):03d}"
+        return s
+
+class SafeFormatter(ISTFormatter):
+    """Formatter that safely handles Unicode characters and uses IST timezone"""
     def format(self, record):
         try:
             return super().format(record)
@@ -71,7 +87,7 @@ class SafeFormatter(logging.Formatter):
             record.msg = safe_msg
             return super().format(record)
 
-# Configure logging with safe Unicode handling
+# Configure logging with safe Unicode handling and IST timezone
 formatter = SafeFormatter('%(asctime)s - %(levelname)s - %(message)s')
 
 # File handler with UTF-8 encoding - will be set in main function
@@ -2745,27 +2761,53 @@ def main():
     print("=" * 60)
     
     try:
-        # Read quantities from stdin (sent by dashboard) or prompt if running locally
-        if is_azure_environment():
-            # On Azure, quantities are passed via stdin from dashboard
-            call_quantity = int(input("Enter Call Quantity: ").strip())
-            put_quantity = int(input("Enter Put Quantity: ").strip())
-        else:
-            # Local: try stdin first (if called from dashboard), otherwise prompt
-            try:
-                call_quantity = int(input("Enter Call Quantity: ").strip())
-                put_quantity = int(input("Enter Put Quantity: ").strip())
-            except (EOFError, ValueError):
-                # If stdin is empty or invalid, use defaults or prompt
-                call_quantity = int(input("Enter Call Quantity (default 150): ").strip() or "150")
-                put_quantity = int(input("Enter Put Quantity (default 150): ").strip() or "150")
-        
         # Get lot size from config (imported via 'from config import *')
         try:
             lot_size = LOT_SIZE
         except NameError:
             # Fallback if LOT_SIZE not defined in config
-            lot_size = 75
+            lot_size = 65
+        
+        # Check if quantities were already read from stdin earlier (lines 2556-2571)
+        # If call_quantity and put_quantity are still default (1), we need to read them
+        quantities_already_read = (call_quantity > 1 and put_quantity > 1)
+        
+        if quantities_already_read:
+            # Quantities were already read from stdin in the credentials section
+            logging.info(f"[QUANTITY] Using quantities already read from stdin: Call={call_quantity}, Put={put_quantity}")
+            print(f"[OK] Quantities received from dashboard: Call={call_quantity}, Put={put_quantity}")
+        else:
+            # Quantities not yet read - read from stdin or prompt
+            if is_azure_environment():
+                # On Azure, quantities should have been passed via stdin from dashboard
+                # If not already read, this is likely a direct script execution
+                logging.warning("[QUANTITY] Quantities not received via stdin, attempting to read now...")
+                try:
+                    call_input = input("Enter Call Quantity: ").strip()
+                    put_input = input("Enter Put Quantity: ").strip()
+                    call_quantity = int(call_input)
+                    put_quantity = int(put_input)
+                except (EOFError, ValueError) as e:
+                    # stdin exhausted or invalid - use default quantities based on lot_size
+                    default_qty = lot_size * 3  # Default to 3 lots (195 for lot_size=65)
+                    call_quantity = default_qty
+                    put_quantity = default_qty
+                    logging.warning(f"[QUANTITY] Could not read quantities: {e}. Using default: {default_qty}")
+                    print(f"[OK] Using default quantities (3 lots): Call={call_quantity}, Put={put_quantity}")
+            else:
+                # Local: try stdin first (if called from dashboard), otherwise prompt
+                try:
+                    call_quantity = int(input("Enter Call Quantity: ").strip())
+                    put_quantity = int(input("Enter Put Quantity: ").strip())
+                except (EOFError, ValueError):
+                    # If stdin is empty or invalid, use defaults or prompt
+                    default_qty = lot_size * 3  # Default to 3 lots
+                    try:
+                        call_quantity = int(input(f"Enter Call Quantity (default {default_qty}): ").strip() or str(default_qty))
+                        put_quantity = int(input(f"Enter Put Quantity (default {default_qty}): ").strip() or str(default_qty))
+                    except (EOFError, ValueError):
+                        call_quantity = default_qty
+                        put_quantity = default_qty
         
         # Validate quantities are multiples of lot_size
         if call_quantity % lot_size != 0:
@@ -2782,14 +2824,20 @@ def main():
             logging.warning(f"Put Quantity {put_quantity} is not a multiple of {lot_size}. Rounding down to {rounded_put}")
             put_quantity = rounded_put
         
-        print(f"[OK] Call Quantity: {call_quantity}")
-        print(f"[OK] Put Quantity: {put_quantity}")
+        print(f"[OK] Final Call Quantity: {call_quantity}")
+        print(f"[OK] Final Put Quantity: {put_quantity}")
         print("=" * 60)
         
     except (ValueError, EOFError) as e:
+        # Get lot size for default calculation
+        try:
+            lot_size = LOT_SIZE
+        except NameError:
+            lot_size = 65
+        default_qty = lot_size * 3  # Default to 3 lots
         print(f"[ERROR] Invalid quantity entered: {e}. Using default values.")
-        call_quantity = 150  # Default to 150 (2 lots)
-        put_quantity = 150
+        call_quantity = default_qty
+        put_quantity = default_qty
         print(f"[OK] Using default quantities - Call: {call_quantity}, Put: {put_quantity}")
     
     # Initialize config monitoring system

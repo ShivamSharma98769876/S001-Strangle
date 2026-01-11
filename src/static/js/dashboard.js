@@ -88,6 +88,51 @@ function hideAuthModal() {
     }
 }
 
+// JWT Token Preservation for Navigation
+// This ensures JWT token is preserved when navigating between pages
+function preserveJwtTokenInLinks() {
+    // Extract JWT token from current URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const ssoToken = urlParams.get('sso_token');
+    
+    if (!ssoToken) {
+        return; // No token to preserve
+    }
+    
+    // Update all navigation links to include JWT token
+    const navigationLinks = document.querySelectorAll('a[href^="/"]');
+    navigationLinks.forEach(link => {
+        const href = link.getAttribute('href');
+        if (!href) return;
+        
+        // Skip if already has sso_token
+        if (href.includes('sso_token=')) return;
+        
+        // Skip external links
+        if (href.startsWith('http://') || href.startsWith('https://')) return;
+        
+        // Skip anchor links
+        if (href.startsWith('#')) return;
+        
+        // Add JWT token to link
+        const separator = href.includes('?') ? '&' : '?';
+        link.setAttribute('href', `${href}${separator}sso_token=${encodeURIComponent(ssoToken)}`);
+    });
+    
+    // Also intercept programmatic navigation (pushState)
+    const originalPushState = history.pushState;
+    history.pushState = function(...args) {
+        const url = args[2];
+        if (url && !url.includes('sso_token=') && url.startsWith('/')) {
+            const separator = url.includes('?') ? '&' : '?';
+            args[2] = `${url}${separator}sso_token=${encodeURIComponent(ssoToken)}`;
+        }
+        return originalPushState.apply(history, args);
+    };
+    
+    console.log('[JWT] Token preserved in navigation links');
+}
+
 // Pre-populate authentication form fields
 async function populateAuthFormFields() {
     let serverDetails = {};
@@ -879,19 +924,22 @@ async function disconnectZerodha() {
 
 // Initialize dashboard
 document.addEventListener('DOMContentLoaded', function() {
+    // Preserve JWT token in all navigation links FIRST
+    preserveJwtTokenInLinks();
+    
     // Initialize with NOT authenticated state first
     isAuthenticated = false;
     updateAuthUI(false);
-    
+
     initializeCumulativePnlChart();
     initializePnlCalendar();
     setupEventListeners();
-    
+
     // Check auth status after a small delay to ensure UI is ready
     setTimeout(() => {
         checkAuthStatus();
     }, 100);
-    
+
     // Don't check connectivity or update details until authenticated
     // These will be called by checkAuthStatus if authenticated
 });
