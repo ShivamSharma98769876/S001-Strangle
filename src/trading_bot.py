@@ -7,8 +7,9 @@ import time as time_module
 from datetime import datetime, time
 from config import (
     TARGET_DELTA_LOW, TARGET_DELTA_HIGH, MAX_STOP_LOSS_TRIGGER,
-    MARKET_START_TIME, MARKET_END_TIME, TRADING_START_TIME,
-    STOP_LOSS_CONFIG, HEDGE_TRIGGER_POINTS, INITIAL_PROFIT_BOOKING, SECOND_PROFIT_BOOKING
+    MARKET_START_TIME, MARKET_END_TIME, TRADING_START_TIME, SQUARE_OFF_TIME,
+    STOP_LOSS_CONFIG, HEDGE_TRIGGER_POINTS, INITIAL_PROFIT_BOOKING, SECOND_PROFIT_BOOKING,
+    SQUARE_OFF_MINUTES_BEFORE_CLOSE, STRATEGY_TAG
 )
 from src.kite_client import KiteClient
 from src.options_calculator import OptionsCalculator
@@ -163,6 +164,7 @@ class TradingBot:
         end_time = MARKET_END_TIME
         self.loss_taken = 0
         hedge_taken = False
+        square_off_executed = False  # Track if square-off has been executed
 
         try:
             call_initial_price = self.kite_client.get_ltp(f"NFO:{self.call_strike['tradingsymbol']}")
@@ -186,7 +188,27 @@ class TradingBot:
                 self._modify_stop_loss_orders()
                 break
 
-            # Exit trades and modify stop-loss at market close
+            # ============================================================
+            # CRITICAL: Market Close Square-Off Logic (1 minute before close)
+            # This MUST be checked BEFORE the market close check
+            # ============================================================
+            if not square_off_executed and now >= SQUARE_OFF_TIME:
+                square_off_time_str = SQUARE_OFF_TIME.strftime("%H:%M")
+                market_close_str = MARKET_END_TIME.strftime("%H:%M")
+                
+                logging.warning(
+                    f"🕐 MARKET CLOSE APPROACHING - Initiating Square-Off at {square_off_time_str} IST "
+                    f"(market closes at {market_close_str} IST, {SQUARE_OFF_MINUTES_BEFORE_CLOSE} minute(s) before close)"
+                )
+                
+                # Execute square-off of all positions
+                self._square_off_all_positions_at_market_close()
+                square_off_executed = True
+                
+                logging.info("✅ Market close square-off completed. Exiting monitor loop.")
+                break
+
+            # Exit trades and modify stop-loss at market close (fallback - should not reach here)
             if now >= end_time:
                 logging.info("Market is closing, modifying stop-loss orders.")
                 self._modify_stop_loss_orders()
@@ -350,6 +372,187 @@ class TradingBot:
             
         except Exception as e:
             logging.error(f"Error during cleanup: {e}")
+    
+    def _square_off_all_positions_at_market_close(self):
+        """
+        Square off all open positions at market close time.
+        
+        IMPORTANT: Only squares off positions created by this strategy (tag: S001).
+        
+        This method is called 1 minute before market close (configurable via SQUARE_OFF_MINUTES_BEFORE_CLOSE).
+        It performs the following steps:
+        1. Cancel all pending stop-loss orders (with S001 tag)
+        2. Square off each tracked position individually (with S001 tag)
+        3. Use emergency square-off via Kite API as fallback (only for our tracked symbols)
+        """
+        square_off_time_str = SQUARE_OFF_TIME.strftime("%H:%M")
+        market_close_str = MARKET_END_TIME.strftime("%H:%M")
+        
+        logging.warning(
+            f"🕐 Market Close Square-Off initiated at {square_off_time_str} IST "
+            f"(market closes at {market_close_str} IST)"
+        )
+        logging.info(f"📋 Only squaring off positions with tag: '{STRATEGY_TAG}'")
+        
+        squared_off_count = 0
+        failed_count = 0
+        failed_positions = []
+        
+        # Build list of tracked symbols (only these will be squared off)
+        tracked_symbols = []
+        if self.call_strike:
+            tracked_symbols.append(self.call_strike['tradingsymbol'])
+        if self.put_strike:
+            tracked_symbols.append(self.put_strike['tradingsymbol'])
+        
+        logging.info(f"📋 Tracked positions to square off (tag '{STRATEGY_TAG}'): {tracked_symbols}")
+        
+        # Step 1: Cancel all pending stop-loss orders first (only our orders)
+        logging.info("Step 1: Cancelling all pending stop-loss orders (tag: S001)...")
+        
+        if self.call_sl_order_id:
+            try:
+                # Check if SL order is still pending before canceling
+                sl_status = self.kite_client.get_order_status(self.call_sl_order_id)
+                if sl_status and sl_status not in ['COMPLETE', 'CANCELLED', 'REJECTED']:
+                    self.kite_client.cancel_order(self.call_sl_order_id)
+                    logging.info(f"Cancelled Call SL order (tag: {STRATEGY_TAG}): {self.call_sl_order_id}")
+            except Exception as e:
+                logging.warning(f"Could not cancel Call SL order {self.call_sl_order_id}: {e}")
+        
+        if self.put_sl_order_id:
+            try:
+                # Check if SL order is still pending before canceling
+                sl_status = self.kite_client.get_order_status(self.put_sl_order_id)
+                if sl_status and sl_status not in ['COMPLETE', 'CANCELLED', 'REJECTED']:
+                    self.kite_client.cancel_order(self.put_sl_order_id)
+                    logging.info(f"Cancelled Put SL order (tag: {STRATEGY_TAG}): {self.put_sl_order_id}")
+            except Exception as e:
+                logging.warning(f"Could not cancel Put SL order {self.put_sl_order_id}: {e}")
+        
+        # Step 2: Square off tracked positions (CALL and PUT) - only our S001 positions
+        logging.info(f"Step 2: Squaring off tracked positions (tag: {STRATEGY_TAG})...")
+        
+        positions_to_square_off = []
+        
+        # Add Call position if it exists
+        if self.call_strike:
+            positions_to_square_off.append({
+                'name': 'CALL',
+                'strike': self.call_strike,
+                'quantity': self.call_quantity
+            })
+        
+        # Add Put position if it exists
+        if self.put_strike:
+            positions_to_square_off.append({
+                'name': 'PUT',
+                'strike': self.put_strike,
+                'quantity': self.put_quantity
+            })
+        
+        if not positions_to_square_off:
+            logging.info(f"ℹ️ No tracked positions to square off (tag: {STRATEGY_TAG})")
+        
+        for pos_info in positions_to_square_off:
+            try:
+                pos_name = pos_info['name']
+                strike = pos_info['strike']
+                quantity = pos_info['quantity']
+                tradingsymbol = strike['tradingsymbol']
+                
+                logging.info(f"Squaring off {pos_name} position (tag: {STRATEGY_TAG}): {tradingsymbol}, Qty: {quantity}")
+                
+                # Get current LTP for logging purposes
+                try:
+                    current_ltp = self.kite_client.get_ltp(f"NFO:{tradingsymbol}")
+                    logging.info(f"  Current LTP for {tradingsymbol}: {current_ltp}")
+                except Exception as e:
+                    logging.warning(f"  Could not fetch LTP for {tradingsymbol}: {e}")
+                    current_ltp = None
+                
+                # Place BUY order to close the SHORT position (we sold options, so we need to buy back)
+                # Using STRATEGY_TAG to ensure proper tagging
+                order_id = self.kite_client.place_market_order(
+                    tradingsymbol=tradingsymbol,
+                    exchange='NFO',
+                    transaction_type='BUY',  # Buy to close short position
+                    quantity=quantity,
+                    product='NRML',
+                    tag=STRATEGY_TAG  # Use strategy tag (S001)
+                )
+                
+                if order_id:
+                    logging.info(
+                        f"✅ {pos_name} position squared off successfully (tag: {STRATEGY_TAG}): "
+                        f"{tradingsymbol}, Order ID: {order_id}"
+                    )
+                    squared_off_count += 1
+                else:
+                    logging.error(f"❌ Failed to square off {pos_name} position: {tradingsymbol} - No order ID returned")
+                    failed_count += 1
+                    failed_positions.append(tradingsymbol)
+                
+                # Small delay between orders to avoid rate limiting
+                time_module.sleep(0.2)
+                
+            except Exception as e:
+                pos_name = pos_info.get('name', 'UNKNOWN')
+                tradingsymbol = pos_info.get('strike', {}).get('tradingsymbol', 'UNKNOWN')
+                logging.error(f"❌ Error squaring off {pos_name} position ({tradingsymbol}): {e}")
+                failed_count += 1
+                failed_positions.append(tradingsymbol)
+        
+        # Step 3: Emergency fallback - if any positions failed, use square_off_all_positions
+        # IMPORTANT: Only square off our tracked symbols (not all positions!)
+        if failed_count > 0 and tracked_symbols:
+            logging.warning(
+                f"⚠️ {failed_count} position(s) failed to square off: {failed_positions}. "
+                f"Attempting emergency square-off for tracked symbols only (tag: {STRATEGY_TAG})..."
+            )
+            try:
+                # Only square off positions matching our tracked symbols
+                emergency_order_ids = self.kite_client.square_off_all_positions(
+                    tag_filter=STRATEGY_TAG,
+                    allowed_symbols=tracked_symbols  # Only our positions!
+                )
+                if emergency_order_ids:
+                    logging.info(
+                        f"✅ Emergency square-off executed (tag: {STRATEGY_TAG}): "
+                        f"{len(emergency_order_ids)} order(s) placed - {emergency_order_ids}"
+                    )
+                    squared_off_count += len(emergency_order_ids)
+                else:
+                    logging.warning("⚠️ Emergency square-off returned no orders. Positions may already be closed.")
+            except Exception as e:
+                logging.critical(
+                    f"❌ CRITICAL: Emergency square-off also failed: {e}. "
+                    f"Please manually close positions before market close!"
+                )
+        
+        # Clear position tracking after square-off
+        self.call_strike = None
+        self.put_strike = None
+        self.call_order_id = None
+        self.put_order_id = None
+        self.call_sl_order_id = None
+        self.put_sl_order_id = None
+        
+        # Log summary
+        logging.info(
+            f"✅ Market Close Square-Off Summary (Tag: {STRATEGY_TAG}):\n"
+            f"   - Time: {datetime.now().strftime('%H:%M:%S')} IST\n"
+            f"   - Positions squared off: {squared_off_count}\n"
+            f"   - Failed: {failed_count}\n"
+            f"   - Total processed: {squared_off_count + failed_count}\n"
+            f"   - Tracked symbols: {tracked_symbols}"
+        )
+        
+        if failed_count > 0:
+            logging.critical(
+                f"⚠️ WARNING: {failed_count} position(s) may not have been closed properly. "
+                f"Please verify manually! (Tag: {STRATEGY_TAG})"
+            )
     
     def _check_stop_loss_orders(self, underlying_price, initial_total_premium, current_total_premium):
         """Check and handle stop-loss order triggers"""

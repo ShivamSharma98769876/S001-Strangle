@@ -451,3 +451,222 @@ class KiteClient:
         except Exception as e:
             logging.error(f"Error getting order status for {order_id}: {e}")
             return None
+    
+    def get_positions(self):
+        """
+        Get all current positions from Kite
+        
+        Returns:
+            list: List of position dictionaries with quantity, tradingsymbol, exchange, product, etc.
+        """
+        try:
+            positions = self.kite.positions()
+            # Return day positions (net positions for today)
+            day_positions = positions.get('day', [])
+            logging.info(f"Fetched {len(day_positions)} day positions from Kite")
+            return day_positions
+        except Exception as e:
+            logging.error(f"Error fetching positions: {e}")
+            return []
+    
+    def get_net_positions(self):
+        """
+        Get net positions (combined day and overnight positions)
+        
+        Returns:
+            list: List of net position dictionaries
+        """
+        try:
+            positions = self.kite.positions()
+            # Return net positions
+            net_positions = positions.get('net', [])
+            logging.info(f"Fetched {len(net_positions)} net positions from Kite")
+            return net_positions
+        except Exception as e:
+            logging.error(f"Error fetching net positions: {e}")
+            return []
+    
+    def place_market_order(self, tradingsymbol, exchange, transaction_type, quantity, product="NRML", tag="S001"):
+        """
+        Place a market order
+        
+        Args:
+            tradingsymbol: Trading symbol (e.g., 'NIFTY24JAN19000CE')
+            exchange: Exchange ('NFO', 'NSE', etc.)
+            transaction_type: 'BUY' or 'SELL'
+            quantity: Order quantity
+            product: Product type ('NRML' or 'MIS')
+            tag: Order tag
+            
+        Returns:
+            str: Order ID if successful, None otherwise
+        """
+        try:
+            # Convert transaction_type string to Kite constant
+            if transaction_type.upper() == 'BUY':
+                txn_type = self.kite.TRANSACTION_TYPE_BUY
+            else:
+                txn_type = self.kite.TRANSACTION_TYPE_SELL
+            
+            # Convert product string to Kite constant
+            if product.upper() == 'MIS':
+                product_type = self.kite.PRODUCT_MIS
+            else:
+                product_type = self.kite.PRODUCT_NRML
+            
+            order_id = self.kite.place_order(
+                variety=self.kite.VARIETY_REGULAR,
+                exchange=exchange,
+                tradingsymbol=tradingsymbol,
+                transaction_type=txn_type,
+                quantity=quantity,
+                order_type=self.kite.ORDER_TYPE_MARKET,
+                product=product_type,
+                tag=tag
+            )
+            logging.info(f"Market order placed successfully. ID: {order_id}, Symbol: {tradingsymbol}, Type: {transaction_type}, Qty: {quantity}")
+            return order_id
+        except Exception as e:
+            logging.error(f"Error placing market order for {tradingsymbol}: {e}")
+            return None
+    
+    def square_off_position(self, tradingsymbol, exchange, quantity, product="NRML"):
+        """
+        Square off a specific position
+        
+        Args:
+            tradingsymbol: Trading symbol
+            exchange: Exchange
+            quantity: Position quantity (positive for long, negative for short)
+            product: Product type
+            
+        Returns:
+            str: Order ID if successful, None otherwise
+        """
+        try:
+            # Determine transaction type: if quantity > 0 (long), SELL to close; if < 0 (short), BUY to close
+            transaction_type = "SELL" if quantity > 0 else "BUY"
+            
+            order_id = self.place_market_order(
+                tradingsymbol=tradingsymbol,
+                exchange=exchange,
+                transaction_type=transaction_type,
+                quantity=abs(quantity),
+                product=product,
+                tag="S001"
+            )
+            
+            if order_id:
+                logging.info(f"Position squared off: {tradingsymbol}, Order ID: {order_id}")
+            return order_id
+        except Exception as e:
+            logging.error(f"Error squaring off position {tradingsymbol}: {e}")
+            return None
+    
+    def square_off_all_positions(self, tag_filter="S001", allowed_symbols=None):
+        """
+        Square off positions, optionally filtered by allowed symbols
+        
+        This method fetches all current positions and places market orders to close them.
+        Used for emergency square-off at market close or when needed.
+        
+        Args:
+            tag_filter: Tag to use for square-off orders (default: 'S001')
+            allowed_symbols: List of tradingsymbols to square off. If None, squares off all positions.
+                            If provided, only positions matching these symbols will be closed.
+        
+        Returns:
+            list: List of order IDs for successful square-off orders
+        """
+        try:
+            positions = self.get_positions()
+            order_ids = []
+            
+            for pos in positions:
+                quantity = pos.get('quantity', 0)
+                tradingsymbol = pos.get('tradingsymbol')
+                
+                if quantity == 0:
+                    continue  # Skip positions with zero quantity
+                
+                # Filter by allowed symbols if provided
+                if allowed_symbols is not None:
+                    if tradingsymbol not in allowed_symbols:
+                        logging.debug(f"Skipping position {tradingsymbol} - not in allowed symbols list")
+                        continue
+                
+                try:
+                    exchange = pos.get('exchange', 'NFO')
+                    product = pos.get('product', 'NRML')
+                    
+                    # Determine transaction type
+                    # If quantity is positive, it's a long position, so SELL to close
+                    # If quantity is negative, it's a short position, so BUY to close
+                    transaction_type = "SELL" if quantity > 0 else "BUY"
+                    
+                    logging.info(f"Squaring off position: {tradingsymbol}, Qty: {quantity}, Type: {transaction_type}, Tag: {tag_filter}")
+                    
+                    order_id = self.place_market_order(
+                        tradingsymbol=tradingsymbol,
+                        exchange=exchange,
+                        transaction_type=transaction_type,
+                        quantity=abs(quantity),
+                        product=product,
+                        tag=tag_filter
+                    )
+                    
+                    if order_id:
+                        order_ids.append(order_id)
+                        logging.info(f"Squared off position: {tradingsymbol}, Order ID: {order_id}")
+                    
+                    time_module.sleep(0.1)  # Small delay between orders to avoid rate limiting
+                except Exception as e:
+                    logging.error(f"Error squaring off position {tradingsymbol}: {e}")
+                    continue
+            
+            logging.info(f"Square off complete. Squared off {len(order_ids)} positions with tag '{tag_filter}'")
+            return order_ids
+        except Exception as e:
+            logging.error(f"Error squaring off positions: {e}")
+            return []
+    
+    def get_orders_by_tag(self, tag="S001"):
+        """
+        Get all orders with a specific tag
+        
+        Args:
+            tag: Order tag to filter by (default: 'S001')
+            
+        Returns:
+            list: List of orders with the specified tag
+        """
+        try:
+            all_orders = self.kite.orders()
+            filtered_orders = [order for order in all_orders if order.get('tag') == tag]
+            logging.info(f"Found {len(filtered_orders)} orders with tag '{tag}'")
+            return filtered_orders
+        except Exception as e:
+            logging.error(f"Error fetching orders by tag: {e}")
+            return []
+    
+    def get_positions_by_symbols(self, symbols):
+        """
+        Get positions that match specific trading symbols
+        
+        Args:
+            symbols: List of trading symbols to filter
+            
+        Returns:
+            list: List of positions matching the symbols
+        """
+        try:
+            all_positions = self.get_positions()
+            filtered_positions = [
+                pos for pos in all_positions 
+                if pos.get('tradingsymbol') in symbols and pos.get('quantity', 0) != 0
+            ]
+            logging.info(f"Found {len(filtered_positions)} positions matching specified symbols")
+            return filtered_positions
+        except Exception as e:
+            logging.error(f"Error fetching positions by symbols: {e}")
+            return []

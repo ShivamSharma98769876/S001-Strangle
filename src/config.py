@@ -43,8 +43,15 @@ EXPIRY_DAY = NIFTY_EXPIRY_DAY  # Default expiry day for the underlying
 
 # Market Hours
 MARKET_START_TIME = time(9, 15)
-MARKET_END_TIME = time(23, 55)
+MARKET_END_TIME = time(14, 57)  # Market closes at 3:30 PM IST
 TRADING_START_TIME = time(9, 40)
+
+# Market Close Square-Off Configuration
+SQUARE_OFF_MINUTES_BEFORE_CLOSE = 1  # Square off positions 1 minute before market close
+# Calculate square-off time (15:29 for 15:30 close)
+_market_close_minutes = MARKET_END_TIME.hour * 60 + MARKET_END_TIME.minute
+_square_off_minutes = _market_close_minutes - SQUARE_OFF_MINUTES_BEFORE_CLOSE
+SQUARE_OFF_TIME = time(_square_off_minutes // 60, _square_off_minutes % 60)  # 15:29
 
 # Stop Loss Configuration by Day
 STOP_LOSS_CONFIG = {
