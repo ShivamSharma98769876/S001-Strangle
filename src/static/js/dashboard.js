@@ -9,26 +9,58 @@ let cumulativePnlChart = null;
 const requestCache = new Map();
 const CACHE_TTL = 5000; // 5 seconds cache TTL
 
-// Cached fetch with TTL
+// Cached fetch with TTL - only for safe GET requests, simplified implementation
 async function cachedFetch(url, options = {}) {
+    // Don't cache POST requests or auth endpoints
+    const method = (options.method || 'GET').toUpperCase();
+    const isAuthEndpoint = url.includes('/api/auth/');
+    
+    if (method !== 'GET' || isAuthEndpoint) {
+        // For non-GET or auth endpoints, just use regular fetch
+        return fetch(url, { ...options, credentials: 'include' });
+    }
+    
     const cacheKey = `${url}_${JSON.stringify(options)}`;
     const cached = requestCache.get(cacheKey);
     const now = Date.now();
     
-    // Return cached response if still valid
+    // Return cached data if still valid - use a wrapper function
     if (cached && (now - cached.timestamp) < CACHE_TTL) {
-        return cached.response.clone(); // Clone to allow multiple reads
+        // Return a promise that resolves to a response-like object
+        return Promise.resolve({
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+            headers: {
+                get: function(name) {
+                    if (name.toLowerCase() === 'content-type') return 'application/json';
+                    return null;
+                }
+            },
+            json: async () => cached.data,
+            text: async () => JSON.stringify(cached.data),
+            clone: function() { return this; }
+        });
     }
     
     // Make fresh request
     const response = await fetch(url, { ...options, credentials: 'include' });
     
-    // Cache successful responses
+    // Cache successful JSON responses (read and cache in background)
     if (response.ok) {
-        requestCache.set(cacheKey, {
-            response: response.clone(),
-            timestamp: now
-        });
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+            // Clone response to read it without consuming the original
+            response.clone().json().then(data => {
+                requestCache.set(cacheKey, {
+                    data: data,
+                    timestamp: Date.now()
+                });
+            }).catch(e => {
+                // Silently fail caching
+                console.debug('Cache write failed:', e);
+            });
+        }
     }
     
     return response;
@@ -161,7 +193,16 @@ async function authenticateWithAccessToken(event) {
             })
         });
         
-        const data = await response.json();
+        // Handle non-JSON responses (like 401 errors)
+        let data;
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+            data = await response.json();
+        } else {
+            const text = await response.text();
+            throw new Error(text || `Server returned ${response.status} ${response.statusText}`);
+        }
+        
         if (data.success) {
             hideAuthModal();
             await checkAuthStatus();
@@ -171,7 +212,7 @@ async function authenticateWithAccessToken(event) {
                 addNotification('Successfully authenticated', 'success');
             }
         } else {
-            errorDiv.textContent = data.message || 'Authentication failed';
+            errorDiv.textContent = data.message || data.error || 'Authentication failed';
             errorDiv.style.display = 'block';
         }
     } catch (error) {
@@ -400,6 +441,11 @@ async function updateStatus() {
 
 // Update trades
 async function updateTrades() {
+    // Don't update if not authenticated
+    if (!isAuthenticated) {
+        return;
+    }
+    
     try {
         const showAll = document.getElementById('showAllTrades')?.checked || false;
         const dateFilter = document.getElementById('tradeDateFilter')?.value || '';
@@ -409,7 +455,15 @@ async function updateTrades() {
         if (dateFilter) url += `date=${dateFilter}`;
         
         const response = await cachedFetch(url);
-        if (!response.ok) return;
+        if (!response.ok) {
+            if (response.status === 401) {
+                // Not authenticated, stop updates
+                isAuthenticated = false;
+                updateAuthUI(false);
+                stopUpdates();
+            }
+            return;
+        }
         
         const data = await response.json();
         if (data.success && data.trades) {
@@ -418,6 +472,12 @@ async function updateTrades() {
         }
     } catch (error) {
         console.error('Error updating trades:', error);
+        // If it's a JSON parse error, it might be a 401 response
+        if (error.message && (error.message.includes('JSON') || error.message.includes('401'))) {
+            isAuthenticated = false;
+            updateAuthUI(false);
+            stopUpdates();
+        }
     }
 }
 
@@ -1469,6 +1529,11 @@ function applyDateRange() {
 }
 
 async function loadPnlCalendarData() {
+    // Don't load if not authenticated
+    if (!isAuthenticated) {
+        return;
+    }
+    
     try {
         if (!dateRangePickerState.fromDate || !dateRangePickerState.toDate) {
             return;
@@ -1488,9 +1553,18 @@ async function loadPnlCalendarData() {
             const response = await fetch(`/api/dashboard/trade-history?all=true`, {
                 credentials: 'include'
             });
-            if (response.ok) {
-                const data = await response.json();
-                if (data.status === 'success' && data.trades) {
+            if (!response.ok) {
+                if (response.status === 401) {
+                    // Not authenticated, stop updates
+                    isAuthenticated = false;
+                    updateAuthUI(false);
+                    stopUpdates();
+                }
+                return;
+            }
+            
+            const data = await response.json();
+            if (data.status === 'success' && data.trades) {
                     // Process trades into daily P&L
                     pnlCalendarData = {};
                     let totalRealisedPnl = 0;
@@ -1524,6 +1598,12 @@ async function loadPnlCalendarData() {
             }
         } catch (apiError) {
             console.warn('Could not fetch P&L calendar data from API:', apiError);
+            // If it's a 401 error, update auth state
+            if (apiError.message && (apiError.message.includes('401') || apiError.message.includes('Unauthorized'))) {
+                isAuthenticated = false;
+                updateAuthUI(false);
+                stopUpdates();
+            }
         }
         
         // Always render calendar
