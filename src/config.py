@@ -30,9 +30,9 @@ NIFTY_EXPIRY_DAY = 'Tuesday'  # Nifty 50 options expire on Tuesday
 EXPIRY_DAY = NIFTY_EXPIRY_DAY  # Default expiry day for the underlying
 
 # Market Hours
-MARKET_START_TIME = time(09, 15)
+MARKET_START_TIME = time(9, 15)
 MARKET_END_TIME = time(14, 57)  # Market closes at 3:30 PM IST
-TRADING_START_TIME = time(09, 40)
+TRADING_START_TIME = time(9, 40)
 
 # Market Close Square-Off Configuration
 SQUARE_OFF_MINUTES_BEFORE_CLOSE = 1  # Square off positions 1 minute before market close
