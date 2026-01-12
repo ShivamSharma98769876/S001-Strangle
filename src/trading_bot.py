@@ -626,6 +626,13 @@ class TradingBot:
         """Main run method"""
         logging.info("Trading bot started")
         
+        # Log timezone and trading start time for debugging
+        current_ist = get_ist_time()
+        logging.info(f"[TIME CHECK] Current IST datetime: {current_ist.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        logging.info(f"[TIME CHECK] Current IST time: {current_ist.time()}")
+        logging.info(f"[TIME CHECK] TRADING_START_TIME: {TRADING_START_TIME}")
+        logging.info(f"[TIME CHECK] Condition check: {current_ist.time()} >= {TRADING_START_TIME} = {current_ist.time() >= TRADING_START_TIME}")
+        
         # Greek analysis removed - core trading functionality only
         
         while not self.stop_requested:
@@ -635,6 +642,11 @@ class TradingBot:
                 logging.info(f"Underlying price: {underlying_price}")
             
             # Greek analysis removed - core trading functionality only
+            
+            # Enhanced logging for time check
+            time_check_result = now >= TRADING_START_TIME
+            if not time_check_result:
+                logging.info(f"[TIME CHECK] Waiting for trading start time. Current IST: {now}, Required: {TRADING_START_TIME}, Check: {time_check_result}")
             
             if now >= TRADING_START_TIME:
                 logging.info("Executing trade")

@@ -17,8 +17,16 @@ import sys
 IST = timezone(timedelta(hours=5, minutes=30))
 
 def get_ist_time():
-    """Get current time in IST timezone"""
-    return datetime.now(IST)
+    """Get current time in IST timezone
+    
+    IMPORTANT: This function properly converts UTC time to IST.
+    Azure systems typically run in UTC, so we need to convert UTC -> IST.
+    """
+    # Get current UTC time
+    utc_now = datetime.now(timezone.utc)
+    # Convert to IST
+    ist_now = utc_now.astimezone(IST)
+    return ist_now
 
 def format_ist_time(dt=None):
     """Format datetime in IST format: hh:mm:ss AM/PM"""
