@@ -15,6 +15,7 @@ from src.kite_client import KiteClient
 from src.options_calculator import OptionsCalculator
 from src.vix_calculator import VIXCalculator
 from src.vix_delta_manager import VIXDeltaManager
+from src.environment import get_ist_time
 
 # Greek analysis removed - not needed for core trading functionality
 
@@ -64,13 +65,13 @@ class TradingBot:
     
     def _get_today_stop_loss(self):
         """Get stop loss percentage based on current day"""
-        current_day = datetime.now().strftime('%A')
+        current_day = get_ist_time().strftime('%A')
         return STOP_LOSS_CONFIG.get(current_day, STOP_LOSS_CONFIG['default'])
     
     def execute_trade(self, target_delta_low, target_delta_high):
         """Execute the main trading strategy"""
         # Check if market is already closed before starting
-        now = datetime.now().time()
+        now = get_ist_time().time()
         if now >= MARKET_END_TIME:
             logging.warning("[MARKET CLOSED] Market is already closed, exiting execute_trade immediately")
             return
@@ -108,7 +109,7 @@ class TradingBot:
 
             self.call_strike, self.put_strike = strikes
 
-            now = datetime.now().time()
+            now = get_ist_time().time()
             is_amo = not (MARKET_START_TIME <= now <= MARKET_END_TIME)
             
             # Calculate stop loss amounts
@@ -180,7 +181,7 @@ class TradingBot:
         self.new_trade_taken = False
 
         while not self.stop_requested:
-            now = datetime.now().time()
+            now = get_ist_time().time()
 
             # Stop trades if stop-loss has been triggered three times
             if self.stop_loss_trigger_count >= MAX_STOP_LOSS_TRIGGER:
@@ -541,7 +542,7 @@ class TradingBot:
         # Log summary
         logging.info(
             f"✅ Market Close Square-Off Summary (Tag: {STRATEGY_TAG}):\n"
-            f"   - Time: {datetime.now().strftime('%H:%M:%S')} IST\n"
+            f"   - Time: {get_ist_time().strftime('%H:%M:%S')} IST\n"
             f"   - Positions squared off: {squared_off_count}\n"
             f"   - Failed: {failed_count}\n"
             f"   - Total processed: {squared_off_count + failed_count}\n"
@@ -628,7 +629,7 @@ class TradingBot:
         # Greek analysis removed - core trading functionality only
         
         while not self.stop_requested:
-            now = datetime.now().time()
+            now = get_ist_time().time()
             underlying_price = self.kite_client.get_underlying_price()
             if underlying_price:
                 logging.info(f"Underlying price: {underlying_price}")

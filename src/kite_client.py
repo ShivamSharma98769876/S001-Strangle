@@ -7,6 +7,81 @@ from datetime import datetime, date, timedelta
 import time as time_module
 from config import VIX_INSTRUMENT_TOKEN, VIX_FETCH_INTERVAL, VWAP_MINUTES
 
+# Retry configuration
+MAX_RETRIES = 3
+INITIAL_BACKOFF_SECONDS = 1.0
+MAX_BACKOFF_SECONDS = 10.0
+CONSECUTIVE_ERROR_THRESHOLD = 5  # Alert after this many consecutive errors
+
+# Retryable error patterns (server-side/transient issues)
+RETRYABLE_ERROR_PATTERNS = [
+    "504",
+    "502",
+    "503",
+    "gateway time-out",
+    "gateway timeout",
+    "connection reset",
+    "connection refused",
+    "connection timed out",
+    "request failed",
+    "kt-quotes",
+    "couldn't parse the json",
+    "server didn't respond",
+    "too many requests",
+    "rate limit",
+    "network is unreachable",
+    "temporary failure",
+]
+
+
+def is_retryable_error(error_message: str) -> bool:
+    """Check if an error is retryable (transient/server-side)"""
+    error_lower = error_message.lower()
+    return any(pattern in error_lower for pattern in RETRYABLE_ERROR_PATTERNS)
+
+
+def retry_with_backoff(func, *args, max_retries=MAX_RETRIES, **kwargs):
+    """
+    Execute a function with exponential backoff retry logic.
+    
+    Args:
+        func: Function to execute
+        *args: Positional arguments to pass to func
+        max_retries: Maximum number of retry attempts
+        **kwargs: Keyword arguments to pass to func
+        
+    Returns:
+        Result of func if successful, None if all retries fail
+    """
+    last_exception = None
+    backoff = INITIAL_BACKOFF_SECONDS
+    
+    for attempt in range(max_retries + 1):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            last_exception = e
+            error_msg = str(e)
+            
+            if not is_retryable_error(error_msg):
+                # Non-retryable error, don't retry
+                logging.error(f"Non-retryable error: {error_msg}")
+                raise
+            
+            if attempt < max_retries:
+                logging.warning(
+                    f"Retryable error (attempt {attempt + 1}/{max_retries + 1}): {error_msg}. "
+                    f"Retrying in {backoff:.1f}s..."
+                )
+                time_module.sleep(backoff)
+                backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
+            else:
+                logging.warning(
+                    f"All {max_retries + 1} attempts failed. Last error: {error_msg}"
+                )
+    
+    raise last_exception
+
 
 class KiteClient:
     def __init__(self, api_key, api_secret, request_token=None, access_token=None, account=None):
@@ -46,6 +121,16 @@ class KiteClient:
         # VIX caching
         self.last_vix_fetch_time = None
         self.india_vix = None
+        
+        # LTP caching for fallback
+        self.ltp_cache = {}
+        self.ltp_cache_time = {}
+        self.ltp_cache_duration = 60  # Cache duration in seconds
+        
+        # Consecutive error tracking
+        self.consecutive_ltp_errors = 0
+        self.last_error_alert_time = None
+        self.error_alert_cooldown = 300  # Alert at most every 5 minutes
         
         logging.info(f"KiteClient initialized for account: {account}")
     
@@ -185,30 +270,62 @@ class KiteClient:
                 ) from e
     
     def get_underlying_price(self, symbol="NSE:NIFTY 50"):
-        """Get the current price of the underlying asset"""
+        """Get the current price of the underlying asset with retry and caching"""
         try:
-            ltp_data = self.kite.ltp(symbol)
-            return ltp_data[symbol]["last_price"]
+            # Try to fetch with retry logic
+            ltp_data = retry_with_backoff(self.kite.ltp, symbol)
+            price = ltp_data[symbol]["last_price"]
+            
+            # Update cache on success
+            self.ltp_cache[symbol] = price
+            self.ltp_cache_time[symbol] = datetime.now()
+            
+            # Reset consecutive error counter on success
+            self.consecutive_ltp_errors = 0
+            
+            return price
         except Exception as e:
-            logging.error(f"Error fetching underlying price: {e}")
-            return None
+            self._handle_ltp_error(symbol, e)
+            return self._get_cached_ltp(symbol)
     
     def get_india_vix(self):
-        """Get India VIX with caching to avoid excessive API calls"""
+        """Get India VIX with caching and retry logic to avoid excessive API calls"""
         current_time = datetime.now()
         
         # Fetch VIX only if enough time has passed since last fetch
         if (self.last_vix_fetch_time is None or 
             (current_time - self.last_vix_fetch_time).total_seconds() > VIX_FETCH_INTERVAL):
             try:
-                vix_data = self.kite.ltp(VIX_INSTRUMENT_TOKEN)
+                # Use retry logic for VIX fetch
+                vix_data = retry_with_backoff(self.kite.ltp, VIX_INSTRUMENT_TOKEN)
                 self.india_vix = vix_data[VIX_INSTRUMENT_TOKEN]['last_price']
                 self.last_vix_fetch_time = current_time
                 logging.info(f"Fetched India VIX: {self.india_vix} at {self.last_vix_fetch_time}")
             except Exception as e:
-                logging.error(f"Error fetching India VIX: {e}")
-                time_module.sleep(45)
-                return self.get_india_vix()
+                error_msg = str(e)
+                if is_retryable_error(error_msg):
+                    logging.warning(f"Transient error fetching India VIX: {error_msg}")
+                else:
+                    logging.error(f"Error fetching India VIX: {error_msg}")
+                
+                # If we have a cached VIX value, use it
+                if self.india_vix is not None:
+                    logging.info(f"Using cached India VIX: {self.india_vix}")
+                else:
+                    # No cached value - wait and retry once more
+                    logging.warning("No cached VIX available, waiting 30s before retry...")
+                    time_module.sleep(30)
+                    try:
+                        vix_data = retry_with_backoff(self.kite.ltp, VIX_INSTRUMENT_TOKEN)
+                        self.india_vix = vix_data[VIX_INSTRUMENT_TOKEN]['last_price']
+                        self.last_vix_fetch_time = datetime.now()
+                        logging.info(f"Fetched India VIX on retry: {self.india_vix}")
+                    except Exception as retry_error:
+                        logging.error(f"Failed to fetch VIX after retry: {retry_error}")
+                        # Return a default VIX value to prevent crashes
+                        if self.india_vix is None:
+                            self.india_vix = 15.0  # Conservative default
+                            logging.warning(f"Using default VIX value: {self.india_vix}")
         
         return self.india_vix / 100  # Return annualized volatility
     
@@ -226,13 +343,65 @@ class KiteClient:
             return []
     
     def get_ltp(self, symbol):
-        """Get Last Traded Price for a symbol"""
+        """Get Last Traded Price for a symbol with retry and caching"""
         try:
-            ltp_data = self.kite.ltp(symbol)
-            return ltp_data[symbol]['last_price']
+            # Try to fetch with retry logic
+            ltp_data = retry_with_backoff(self.kite.ltp, symbol)
+            price = ltp_data[symbol]['last_price']
+            
+            # Update cache on success
+            self.ltp_cache[symbol] = price
+            self.ltp_cache_time[symbol] = datetime.now()
+            
+            # Reset consecutive error counter on success
+            self.consecutive_ltp_errors = 0
+            
+            return price
         except Exception as e:
-            logging.error(f"Error fetching LTP for {symbol}: {e}")
-            return None
+            self._handle_ltp_error(symbol, e)
+            return self._get_cached_ltp(symbol)
+    
+    def _handle_ltp_error(self, symbol, error):
+        """Handle LTP fetch errors with appropriate logging and alerting"""
+        error_msg = str(error)
+        self.consecutive_ltp_errors += 1
+        
+        # Determine log level based on error type
+        if is_retryable_error(error_msg):
+            # Transient errors - log as warning (less noise)
+            logging.warning(f"Transient error fetching LTP for {symbol}: {error_msg}")
+        else:
+            # Non-transient errors - log as error
+            logging.error(f"Error fetching LTP for {symbol}: {error_msg}")
+        
+        # Alert if too many consecutive errors
+        if self.consecutive_ltp_errors >= CONSECUTIVE_ERROR_THRESHOLD:
+            current_time = datetime.now()
+            should_alert = (
+                self.last_error_alert_time is None or
+                (current_time - self.last_error_alert_time).total_seconds() > self.error_alert_cooldown
+            )
+            
+            if should_alert:
+                logging.error(
+                    f"⚠️ ALERT: {self.consecutive_ltp_errors} consecutive LTP fetch errors! "
+                    f"API may be experiencing issues. Last error: {error_msg}"
+                )
+                self.last_error_alert_time = current_time
+    
+    def _get_cached_ltp(self, symbol):
+        """Get cached LTP value if available and not too stale"""
+        if symbol in self.ltp_cache:
+            cache_age = (datetime.now() - self.ltp_cache_time.get(symbol, datetime.min)).total_seconds()
+            cached_value = self.ltp_cache[symbol]
+            
+            if cache_age < self.ltp_cache_duration * 5:  # Allow stale cache up to 5x duration during errors
+                logging.info(f"Using cached LTP for {symbol}: {cached_value} (age: {cache_age:.0f}s)")
+                return cached_value
+            else:
+                logging.warning(f"Cached LTP for {symbol} is too stale ({cache_age:.0f}s old)")
+        
+        return None
     
     def calculate_vwap(self, symbol, minutes=None):
         """

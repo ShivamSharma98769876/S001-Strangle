@@ -129,6 +129,119 @@ ltp_cache_time = {}  # Cache timestamps for LTP data
 vwap_cache = {}  # Cache for VWAP data
 vwap_cache_time = {}  # Cache timestamps for VWAP data
 
+# Retry configuration for robust API calls
+MAX_LTP_RETRIES = 3
+INITIAL_BACKOFF_SECONDS = 1.0
+MAX_BACKOFF_SECONDS = 10.0
+CONSECUTIVE_ERROR_THRESHOLD = 5  # Alert after this many consecutive errors
+consecutive_ltp_errors = 0  # Track consecutive LTP fetch errors
+last_error_alert_time = None  # Track last alert time for throttling
+
+# Retryable error patterns (server-side/transient issues)
+RETRYABLE_ERROR_PATTERNS = [
+    "504",
+    "502",
+    "503",
+    "gateway time-out",
+    "gateway timeout",
+    "connection reset",
+    "connection refused",
+    "connection timed out",
+    "request failed",
+    "kt-quotes",
+    "couldn't parse the json",
+    "server didn't respond",
+    "too many requests",
+    "rate limit",
+    "network is unreachable",
+    "temporary failure",
+]
+
+
+def is_retryable_error(error_message: str) -> bool:
+    """Check if an error is retryable (transient/server-side)"""
+    error_lower = error_message.lower()
+    return any(pattern in error_lower for pattern in RETRYABLE_ERROR_PATTERNS)
+
+
+def retry_api_call(api_func, *args, max_retries=MAX_LTP_RETRIES, **kwargs):
+    """
+    Execute an API call with exponential backoff retry logic.
+    
+    Args:
+        api_func: API function to execute
+        *args: Positional arguments to pass to api_func
+        max_retries: Maximum number of retry attempts
+        **kwargs: Keyword arguments to pass to api_func
+        
+    Returns:
+        Result of api_func if successful
+        
+    Raises:
+        Last exception if all retries fail
+    """
+    last_exception = None
+    backoff = INITIAL_BACKOFF_SECONDS
+    
+    for attempt in range(max_retries + 1):
+        try:
+            return api_func(*args, **kwargs)
+        except Exception as e:
+            last_exception = e
+            error_msg = str(e)
+            
+            if not is_retryable_error(error_msg):
+                # Non-retryable error, don't retry
+                raise
+            
+            if attempt < max_retries:
+                logging.warning(
+                    f"Retryable API error (attempt {attempt + 1}/{max_retries + 1}): {error_msg}. "
+                    f"Retrying in {backoff:.1f}s..."
+                )
+                time_module.sleep(backoff)
+                backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
+    
+    raise last_exception
+
+
+def handle_ltp_error(symbol, error):
+    """Handle LTP fetch errors with appropriate logging and alerting"""
+    global consecutive_ltp_errors, last_error_alert_time
+    
+    error_msg = str(error)
+    consecutive_ltp_errors += 1
+    
+    # Determine log level based on error type
+    if is_retryable_error(error_msg):
+        # Transient errors - log as warning (less noise)
+        logging.warning(f"Transient error fetching LTP for {symbol}: {error_msg}")
+    else:
+        # Non-transient errors - log as error
+        logging.error(f"Error fetching LTP for {symbol}: {error_msg}")
+    
+    # Alert if too many consecutive errors
+    if consecutive_ltp_errors >= CONSECUTIVE_ERROR_THRESHOLD:
+        current_time = datetime.now()
+        error_alert_cooldown = 300  # Alert at most every 5 minutes
+        should_alert = (
+            last_error_alert_time is None or
+            (current_time - last_error_alert_time).total_seconds() > error_alert_cooldown
+        )
+        
+        if should_alert:
+            logging.error(
+                f"⚠️ ALERT: {consecutive_ltp_errors} consecutive LTP fetch errors! "
+                f"Kite API may be experiencing issues. Last error: {error_msg}"
+            )
+            last_error_alert_time = current_time
+
+
+def reset_ltp_error_counter():
+    """Reset the consecutive LTP error counter on successful fetch"""
+    global consecutive_ltp_errors
+    consecutive_ltp_errors = 0
+
 
 def enforce_rate_limit():
     """Enforce rate limiting between API calls"""
@@ -165,7 +278,7 @@ def clear_old_cache():
         logging.debug(f"Cleared {len(expired_ltp_keys)} LTP and {len(expired_vwap_keys)} VWAP cache entries")
 
 def fetch_option_chain():
-    """Fetch NIFTY option chain data with caching and rate limiting"""
+    """Fetch NIFTY option chain data with caching, retry logic, and rate limiting"""
     global option_chain_cache, option_chain_cache_time
     
     # Check cache first
@@ -179,6 +292,8 @@ def fetch_option_chain():
     enforce_rate_limit()
     
     logging.info("Fetching option chain data")
+    backoff = INITIAL_BACKOFF_SECONDS
+    
     for attempt in range(API_MAX_RETRIES):
         try:
             instrument = 'NIFTY'
@@ -194,28 +309,38 @@ def fetch_option_chain():
             
         except Exception as e:
             error_msg = str(e)
-            if "Too many requests" in error_msg:
+            
+            if is_retryable_error(error_msg):
                 if attempt < API_MAX_RETRIES - 1:
-                    logging.warning(f"Rate limit hit (attempt {attempt + 1}/{API_MAX_RETRIES}). Waiting {API_RETRY_DELAY} seconds...")
-                    time_module.sleep(API_RETRY_DELAY)
+                    logging.warning(
+                        f"Retryable error fetching option chain (attempt {attempt + 1}/{API_MAX_RETRIES}): {error_msg}. "
+                        f"Retrying in {backoff:.1f}s..."
+                    )
+                    time_module.sleep(backoff)
+                    backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
                     continue
                 else:
-                    logging.error(f"Rate limit exceeded after {API_MAX_RETRIES} attempts. Using cached data if available.")
+                    logging.warning(f"All {API_MAX_RETRIES} attempts failed. Using cached data if available.")
                     if option_chain_cache is not None:
-                        logging.info("Returning cached option chain data")
+                        cache_age = (datetime.now() - option_chain_cache_time).total_seconds()
+                        logging.info(f"Returning cached option chain data (age: {cache_age:.0f}s)")
                         return option_chain_cache
                     else:
-                        logging.error("No cached data available")
+                        logging.error("No cached option chain data available")
                         return []
             else:
-                logging.error(f"Error fetching option chain: {e}")
+                logging.error(f"Non-retryable error fetching option chain: {error_msg}")
+                # Still try cached data for any error
+                if option_chain_cache is not None:
+                    logging.info("Returning cached option chain data due to error")
+                    return option_chain_cache
                 return []
     
     return []
 
 
 def get_cached_ltp(symbol):
-    """Get LTP with caching to reduce API calls"""
+    """Get LTP with caching, retry logic, and graceful error handling"""
     global ltp_cache, ltp_cache_time
     
     current_time = datetime.now()
@@ -231,25 +356,38 @@ def get_cached_ltp(symbol):
     enforce_rate_limit()
     
     try:
-        ltp_data = kite.ltp(symbol)
+        # Use retry logic for API call
+        ltp_data = retry_api_call(kite.ltp, symbol)
         ltp = ltp_data[symbol]['last_price']
         
         # Update cache
         ltp_cache[symbol] = ltp
         ltp_cache_time[symbol] = current_time
         
+        # Reset error counter on success
+        reset_ltp_error_counter()
+        
         logging.debug(f"Fetched fresh LTP for {symbol}: {ltp}")
         return ltp
         
     except Exception as e:
-        if "Too many requests" in str(e):
-            logging.warning(f"Rate limit hit while fetching LTP for {symbol}. Using cached value if available.")
-            return ltp_cache.get(symbol, None)
-        else:
-            logging.error(f"Error fetching LTP for {symbol}: {e}")
-            return ltp_cache.get(symbol, None)
+        # Handle the error with appropriate logging
+        handle_ltp_error(symbol, e)
+        
+        # Return cached value if available (allow stale cache during errors)
+        if symbol in ltp_cache:
+            cache_age = (current_time - ltp_cache_time.get(symbol, datetime.min)).total_seconds()
+            # Allow stale cache up to 5x duration during errors
+            if cache_age < LTP_CACHE_DURATION * 5:
+                logging.info(f"Using cached LTP for {symbol}: {ltp_cache[symbol]} (age: {cache_age:.0f}s)")
+                return ltp_cache[symbol]
+            else:
+                logging.warning(f"Cached LTP for {symbol} is too stale ({cache_age:.0f}s old)")
+        
+        return None
 
 def get_india_vix():
+    """Get India VIX with caching and graceful error handling"""
     global last_vix_fetch_time, india_vix
     current_time = datetime.now()
 
@@ -257,16 +395,41 @@ def get_india_vix():
     if last_vix_fetch_time is None or (current_time - last_vix_fetch_time).total_seconds() > 120:
         instrument_token = '264969'  # NIFTY VIX instrument token
         try:
-            # Use cached LTP function for VIX
+            # Use cached LTP function for VIX (now has built-in retry logic)
             vix_price = get_cached_ltp(instrument_token)
             if vix_price is not None:
                 india_vix = vix_price
                 last_vix_fetch_time = current_time
                 logging.info(f"Fetched India VIX: {india_vix} at {last_vix_fetch_time}")
+            elif india_vix is not None:
+                # Failed to fetch but have cached value
+                logging.warning(f"Using previously cached India VIX: {india_vix}")
+            else:
+                # No cached VIX available - wait and retry once
+                logging.warning("No cached VIX available, waiting 30s before retry...")
+                time_module.sleep(30)
+                vix_price = get_cached_ltp(instrument_token)
+                if vix_price is not None:
+                    india_vix = vix_price
+                    last_vix_fetch_time = datetime.now()
+                    logging.info(f"Fetched India VIX on retry: {india_vix}")
+                else:
+                    # Still failed - use a conservative default
+                    india_vix = 15.0  # Conservative default VIX
+                    logging.warning(f"Failed to fetch VIX, using default value: {india_vix}")
         except Exception as e:
-            logging.error(f"Error fetching India VIX: {e}")
-            time_module.sleep(45)
-            return get_india_vix()
+            error_msg = str(e)
+            if is_retryable_error(error_msg):
+                logging.warning(f"Transient error fetching India VIX: {error_msg}")
+            else:
+                logging.error(f"Error fetching India VIX: {error_msg}")
+            
+            # Use cached value or default
+            if india_vix is None:
+                india_vix = 15.0  # Conservative default
+                logging.warning(f"Using default VIX value: {india_vix}")
+            else:
+                logging.info(f"Using cached India VIX: {india_vix}")
 
     return india_vix / 100  # Return the latest VIX divided by 100 for annual volatility
 
@@ -537,9 +700,8 @@ def check_go_no_go_conditions(call_strike, put_strike, underlying_price, call_vw
         if 'last_price' not in call_strike or call_strike['last_price'] is None or call_strike['last_price'] == 0:
             try:
                 call_symbol = f"NFO:{call_strike['tradingsymbol']}"
-                ltp_data = kite.ltp(call_symbol)
-                if call_symbol in ltp_data and 'last_price' in ltp_data[call_symbol]:
-                    call_ltp = ltp_data[call_symbol]['last_price']
+                call_ltp = get_cached_ltp(call_symbol)
+                if call_ltp is not None:
                     logging.info(f"Fetched call LTP for {call_strike['tradingsymbol']}: {call_ltp}")
                 else:
                     logging.warning(f"No LTP data found for {call_strike['tradingsymbol']}")
@@ -553,9 +715,8 @@ def check_go_no_go_conditions(call_strike, put_strike, underlying_price, call_vw
         if 'last_price' not in put_strike or put_strike['last_price'] is None or put_strike['last_price'] == 0:
             try:
                 put_symbol = f"NFO:{put_strike['tradingsymbol']}"
-                ltp_data = kite.ltp(put_symbol)
-                if put_symbol in ltp_data and 'last_price' in ltp_data[put_symbol]:
-                    put_ltp = ltp_data[put_symbol]['last_price']
+                put_ltp = get_cached_ltp(put_symbol)
+                if put_ltp is not None:
                     logging.info(f"Fetched put LTP for {put_strike['tradingsymbol']}: {put_ltp}")
                 else:
                     logging.warning(f"No LTP data found for {put_strike['tradingsymbol']}")
@@ -1318,9 +1479,9 @@ def find_strikes(options, underlying_price, target_delta_low, target_delta_high,
             for put in put_strikes:
                 try:
                     # PRIMARY CONDITION: Check price difference first to save compute power
-                    # Get basic LTP prices first (lightweight operation)
-                    call_price = kite.ltp(call['exchange'] + ':' + call['tradingsymbol'])[call['exchange'] + ':' + call['tradingsymbol']]['last_price']
-                    put_price = kite.ltp(put['exchange'] + ':' + put['tradingsymbol'])[put['exchange'] + ':' + put['tradingsymbol']]['last_price']
+                    # Get basic LTP prices first (lightweight operation) with retry logic
+                    call_price = get_cached_ltp(call['exchange'] + ':' + call['tradingsymbol'])
+                    put_price = get_cached_ltp(put['exchange'] + ':' + put['tradingsymbol'])
                     
                     if call_price is None or put_price is None:
                         continue
@@ -1993,8 +2154,12 @@ def monitor_trades(call_order_id, put_order_id, call_strike, put_strike, call_sl
     logging.info("Delta monitoring flags initialized: Call_SL_Modified=False, Put_SL_Modified=False")
 
     try:
-        call_initial_price = kite.ltp(f"NFO:{call_strike['tradingsymbol']}")[f"NFO:{call_strike['tradingsymbol']}"]["last_price"]
-        put_initial_price = kite.ltp(f"NFO:{put_strike['tradingsymbol']}")[f"NFO:{put_strike['tradingsymbol']}"]["last_price"]
+        call_initial_price = get_cached_ltp(f"NFO:{call_strike['tradingsymbol']}")
+        put_initial_price = get_cached_ltp(f"NFO:{put_strike['tradingsymbol']}")
+        if call_initial_price is None or put_initial_price is None:
+            logging.error("Could not fetch initial prices for premium calculation")
+            call_initial_price = call_initial_price or 0
+            put_initial_price = put_initial_price or 0
         initial_total_premium = call_initial_price + put_initial_price
         logging.info(f"Initial Total Premium Received: {initial_total_premium:.3f}")
     except Exception as e:
@@ -2075,9 +2240,24 @@ def monitor_trades(call_order_id, put_order_id, call_strike, put_strike, call_sl
             break
 
         try:
-            underlying_price = kite.ltp("NSE:NIFTY 50")["NSE:NIFTY 50"]["last_price"]
-            call_ltp = kite.ltp(f"NFO:{call_strike['tradingsymbol']}")[f"NFO:{call_strike['tradingsymbol']}"]["last_price"]
-            put_ltp = kite.ltp(f"NFO:{put_strike['tradingsymbol']}")[f"NFO:{put_strike['tradingsymbol']}"]["last_price"]
+            underlying_price = get_cached_ltp("NSE:NIFTY 50")
+            call_ltp = get_cached_ltp(f"NFO:{call_strike['tradingsymbol']}")
+            put_ltp = get_cached_ltp(f"NFO:{put_strike['tradingsymbol']}")
+            
+            if underlying_price is None or call_ltp is None or put_ltp is None:
+                logging.warning("Could not fetch prices, using cached values or skipping this iteration")
+                if underlying_price is None:
+                    underlying_price = get_cached_ltp("NSE:NIFTY 50")  # Try once more
+                if call_ltp is None or put_ltp is None:
+                    time_module.sleep(2)  # Brief wait before retry
+                    call_ltp = call_ltp or get_cached_ltp(f"NFO:{call_strike['tradingsymbol']}")
+                    put_ltp = put_ltp or get_cached_ltp(f"NFO:{put_strike['tradingsymbol']}")
+            
+            if call_ltp is None or put_ltp is None:
+                logging.error("Could not fetch option prices after retry, skipping this iteration")
+                time_module.sleep(5)
+                continue
+                
             current_total_premium = call_ltp + put_ltp
 
             # Handle new trade taken scenario
@@ -2245,7 +2425,11 @@ def monitor_trades(call_order_id, put_order_id, call_strike, put_strike, call_sl
                         new_order_id = place_order(new_strike, kite.TRANSACTION_TYPE_SELL, False, call_quantity)
                         if new_order_id:
                             # Place new stop-loss order
-                            call_ltp = kite.ltp(f"NFO:{new_strike['tradingsymbol']}")[f"NFO:{new_strike['tradingsymbol']}"]['last_price']
+                            call_ltp = get_cached_ltp(f"NFO:{new_strike['tradingsymbol']}")
+                            if call_ltp is None:
+                                logging.error(f"Could not fetch LTP for new call strike {new_strike['tradingsymbol']}")
+                                time_module.sleep(2)
+                                call_ltp = get_cached_ltp(f"NFO:{new_strike['tradingsymbol']}") or 0
                             sl_price = call_ltp + call_sl_to_be_placed
                             new_sl_order_id = place_stop_loss_order(new_strike, kite.TRANSACTION_TYPE_SELL, sl_price, call_quantity)
                             call_order_id, call_sl_order_id, call_strike = new_order_id, new_sl_order_id, new_strike
@@ -2280,7 +2464,11 @@ def monitor_trades(call_order_id, put_order_id, call_strike, put_strike, call_sl
                         new_order_id = place_order(new_strike, kite.TRANSACTION_TYPE_SELL, False, put_quantity)
                         if new_order_id:
                             # Place new stop-loss order
-                            put_ltp = kite.ltp(f"NFO:{new_strike['tradingsymbol']}")[f"NFO:{new_strike['tradingsymbol']}"]['last_price']
+                            put_ltp = get_cached_ltp(f"NFO:{new_strike['tradingsymbol']}")
+                            if put_ltp is None:
+                                logging.error(f"Could not fetch LTP for new put strike {new_strike['tradingsymbol']}")
+                                time_module.sleep(2)
+                                put_ltp = get_cached_ltp(f"NFO:{new_strike['tradingsymbol']}") or 0
                             sl_price = put_ltp + put_sl_to_be_placed
                             new_sl_order_id = place_stop_loss_order(new_strike, kite.TRANSACTION_TYPE_SELL, sl_price, put_quantity)
                             put_order_id, put_sl_order_id, put_strike = new_order_id, new_sl_order_id, new_strike

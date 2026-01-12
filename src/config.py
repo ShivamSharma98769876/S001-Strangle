@@ -16,18 +16,6 @@ except ImportError:
     # Fallback if import fails
     def is_azure_environment():
         return any(os.getenv(var) for var in ['WEBSITE_INSTANCE_ID', 'WEBSITE_SITE_NAME'])
-from dotenv import load_dotenv
-
-# Load environment variables from .env file
-load_dotenv()
-
-# Import environment detection (needed for diagnostic output)
-try:
-    from src.environment import is_azure_environment
-except ImportError:
-    # Fallback if import fails
-    def is_azure_environment():
-        return any(os.getenv(var) for var in ['WEBSITE_INSTANCE_ID', 'WEBSITE_SITE_NAME'])
 
 # Trading Parameters
 TARGET_DELTA_LOW = 0.29  # Lower bound for target delta
@@ -175,7 +163,5 @@ if AZURE_BLOB_ACCOUNT_NAME and AZURE_BLOB_STORAGE_KEY:
 else:
     AZURE_BLOB_CONNECTION_STRING = None
 
-{
-    # DATABASE_URL=postgresql://shivams:Itsme123@postgresql-206372-0.cloudclusters.net:10073/tradingpro
-    "database_url": "postgresql://shivams:Itsme123@postgresql-206372-0.cloudclusters.net:10073/tradingpro"
-}
+# Note: Database URL should be configured via environment variable DATABASE_URL
+# Do not hardcode credentials in this file
