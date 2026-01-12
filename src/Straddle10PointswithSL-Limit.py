@@ -1745,9 +1745,10 @@ def find_strikes(options, underlying_price, target_delta_low, target_delta_high,
                             return None  # Return None to indicate no trade should be executed
                         
                         # Check if we're in market hours
-                        now = datetime.now().time()
+                        # CRITICAL FIX: Use IST time instead of system time (Azure runs in UTC)
+                        now = get_ist_time().time()
                         market_start = time(9, 15)
-                        market_end = time(14, 50)
+                        market_end = time(14, 57)
                         is_amo = not (market_start <= now <= market_end)
                         
                         if is_amo:
@@ -2172,7 +2173,8 @@ def monitor_trades(call_order_id, put_order_id, call_strike, put_strike, call_sl
     profit_booking_occurred = False  # Flag to prevent new trades after profit booking
 
     while True:
-        now = datetime.now().time()
+        # CRITICAL FIX: Use IST time instead of system time (Azure runs in UTC)
+        now = get_ist_time().time()
 
         # Stop trades if stop-loss has been triggered maximum times
         if stop_loss_trigger_count >= MAX_STOP_LOSS_TRIGGER:
@@ -2598,7 +2600,8 @@ def execute_trade(target_delta_low, target_delta_high, hedge_points=None, use_ne
     current_time = datetime.now()
 
     # Check clock and flag before starting
-    now_time = datetime.now().time()
+    # CRITICAL FIX: Use IST time instead of system time (Azure runs in UTC)
+    now_time = get_ist_time().time()
     if now_time >= MARKET_END_TIME:
         logging.warning("[MARKET CLOSED] Market is already closed, exiting execute_trade immediately")
         return
@@ -2660,7 +2663,8 @@ def execute_trade(target_delta_low, target_delta_high, hedge_points=None, use_ne
 
             call_strike, put_strike = strikes
 
-            now = datetime.now().time()
+            # CRITICAL FIX: Use IST time instead of system time (Azure runs in UTC)
+            now = get_ist_time().time()
             market_start = time(9, 15)
             market_end = time(14, 50)
             is_amo = not (market_start <= now <= market_end)
@@ -3039,10 +3043,19 @@ def main():
     target_time = TRADING_START_TIME
     end_time = MARKET_END_TIME
     
+    # Log timezone and trading start time for debugging
+    current_ist = get_ist_time()
+    logging.info(f"[TIME CHECK] Current IST datetime: {current_ist.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    logging.info(f"[TIME CHECK] Current IST time: {current_ist.time()}")
+    logging.info(f"[TIME CHECK] TRADING_START_TIME: {TRADING_START_TIME}")
+    logging.info(f"[TIME CHECK] MARKET_END_TIME: {end_time}")
+    logging.info(f"[TIME CHECK] Condition check: {current_ist.time()} >= {TRADING_START_TIME} = {current_ist.time() >= TRADING_START_TIME}")
+    
     # Greek analysis removed - core trading functionality only
 
     while True:
-        now = datetime.now().time()
+        # CRITICAL FIX: Use IST time instead of system time (Azure runs in UTC)
+        now = get_ist_time().time()
         try:
             underlying_price = get_cached_ltp('NSE:NIFTY 50')
             if underlying_price is not None:
@@ -3085,8 +3098,14 @@ def main():
             
             break
 
+        # Enhanced logging for time check
+        time_check_result = now >= target_time
+        if not time_check_result:
+            logging.info(f"[TIME CHECK] Waiting for trading start time. Current IST: {now}, Required: {target_time}, Check: {time_check_result}")
+        
         if now >= target_time:
             logging.info("Executing trade")
+            logging.info(f"[TIME CHECK] Trading start time reached! Current IST: {now}, Target: {target_time}")
             
             # Get VIX-based delta range
             delta_low, delta_high, hedge_points, use_next_week = get_vix_based_delta_range()
