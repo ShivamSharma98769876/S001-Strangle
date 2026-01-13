@@ -60,12 +60,14 @@ if command -v gunicorn &> /dev/null; then
     echo "[STARTUP] $(date '+%Y-%m-%d %H:%M:%S') - Starting gunicorn server"
     
     # Use optimized gunicorn settings for Azure App Service
+    # Settings are loaded from gunicorn.conf.py if present, otherwise use command-line args
     # --preload: Load app before forking workers (faster startup)
-    # --timeout 600: Long timeout for Azure startup probe
+    # --timeout 600: Long timeout for Azure startup probe (also in gunicorn.conf.py)
     # --workers 1: Single worker for Azure App Service
     # --threads 2: 2 threads per worker for concurrent requests
     # --access-logfile -: Log to stdout (captured by Azure)
     # --error-logfile -: Log errors to stdout (captured by Azure)
+    # Note: gunicorn.conf.py is automatically detected if present in current directory
     exec gunicorn \
         --bind 0.0.0.0:$PORT \
         --timeout 600 \
