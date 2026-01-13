@@ -1952,19 +1952,15 @@ def get_live_trader_logs():
         # STEP 3: Try to read from log file (only if quick)
         # Import lazily to avoid startup delay
         try:
-            from environment import format_date_for_filename, is_azure_environment, sanitize_account_name_for_filename
+            from environment import format_date_for_filename, get_log_directory, sanitize_account_name_for_filename
             from datetime import date
             
             sanitized_account = sanitize_account_name_for_filename(broker_id)
             today_formatted = format_date_for_filename(date.today())
             log_filename = f'{sanitized_account}_{today_formatted}.log'
             
-            # Determine log directory based on environment
-            if is_azure_environment():
-                log_dir = os.path.join('/tmp', sanitized_account, 'logs')
-            else:
-                script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                log_dir = os.path.join(script_dir, 'src', 'logs')
+            # Use get_log_directory to ensure consistent log location (same structure)
+            log_dir = get_log_directory(account_name=broker_id)
             
             log_file_path = os.path.join(log_dir, log_filename)
             

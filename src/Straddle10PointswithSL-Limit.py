@@ -2923,9 +2923,10 @@ def main():
             print(azure_msg)
             logging.info(azure_msg)
             if log_filename:
-                azure_files_msg = f"[LOG] Azure Log Files: Available at {log_filename}"
+                azure_files_msg = f"[LOG] Azure Log Files: Available at {log_filename} (also persisted in Azure Blob Storage)"
             else:
-                azure_files_msg = f"[LOG] Azure Log Files: Directory /tmp/{sanitize_account_name_for_filename(Input_account) if Input_account else 'logs'}/logs/"
+                sanitized = sanitize_account_name_for_filename(Input_account) if Input_account else 'logs'
+                azure_files_msg = f"[LOG] Azure Log Files: Directory /tmp/{sanitized}/logs/ (also persisted in Azure Blob Storage)"
             print(azure_files_msg)
             logging.info(azure_files_msg)
         

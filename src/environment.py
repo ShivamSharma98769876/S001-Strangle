@@ -967,7 +967,15 @@ def setup_azure_logging(logger_name='root', account_name=None):
     """
     Setup logging for Azure App Service
     Azure automatically captures stdout/stderr, so we configure both file and console logging
-    Logs are stored in /tmp/{account_name}/logs/ and also uploaded to Azure Blob Storage
+    
+    Logging Strategy:
+    - File logs: /tmp/{account_name}/logs/ (ephemeral, cleared on deployment)
+    - Azure Blob Storage: Persistent backup (survives deployments)
+    
+    This ensures:
+    1. Same folder structure maintained (src/logs locally, /tmp/{account}/logs in Azure)
+    2. Logs persist across deployments via Azure Blob Storage
+    3. File logs available for immediate access during runtime
     
     CRITICAL FIX: Always add handlers to root logger to ensure logging.info() calls work
     """
@@ -1036,11 +1044,31 @@ def setup_azure_logging(logger_name='root', account_name=None):
         # Ensure named logger propagates to root (default behavior, but make explicit)
         logger.propagate = True
         
-        # FILE-BASED LOGGING ONLY (like disciplined-Trader)
-        # Azure Blob logging removed for better performance and simplicity
+        # FILE-BASED LOGGING + AZURE BLOB STORAGE (for persistence across deployments)
+        # File logs in /tmp are ephemeral (cleared on deployment), but Azure Blob Storage persists
         prefix = "[STRATEGY]" if account_name else "[DASHBOARD]"
-        print(f"{prefix} [LOG SETUP] Using file-based logging only (Azure Blob disabled)")
+        print(f"{prefix} [LOG SETUP] File-based logging enabled: {log_file}")
+        print(f"{prefix} [LOG SETUP] Note: /tmp logs are ephemeral - Azure Blob Storage will be used for persistence")
         logger.info(f"[LOG SETUP] File-based logging enabled: {log_file}")
+        
+        # Also setup Azure Blob Storage logging for persistence across deployments
+        # This ensures logs survive even when /tmp is cleared
+        try:
+            blob_handler, blob_path = setup_azure_blob_logging(
+                account_name=account_name,
+                logger_name=logger_name,
+                streaming_mode=True,  # Real-time streaming to blob
+                skip_verification=True  # Fast startup
+            )
+            if blob_handler:
+                print(f"{prefix} [LOG SETUP] ✓ Azure Blob Storage logging enabled for persistence: {blob_path}")
+                logger.info(f"[LOG SETUP] Azure Blob Storage logging enabled: {blob_path}")
+            else:
+                print(f"{prefix} [LOG SETUP] ⚠ Azure Blob Storage logging not available (check environment variables)")
+                print(f"{prefix} [LOG SETUP] ⚠ WARNING: Logs in /tmp will be lost on deployment!")
+        except Exception as blob_error:
+            print(f"{prefix} [LOG SETUP] ⚠ Could not setup Azure Blob Storage: {blob_error}")
+            print(f"{prefix} [LOG SETUP] ⚠ WARNING: Logs in /tmp will be lost on deployment!")
         
         # Force file creation by writing an initial log message
         # This ensures the file exists immediately
