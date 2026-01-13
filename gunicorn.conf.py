@@ -43,8 +43,11 @@ preload_app = True
 graceful_timeout = 30
 
 # Maximum requests per worker before restart (helps prevent memory leaks)
-max_requests = 1000
-max_requests_jitter = 50
+# Set to 0 to disable automatic restarts (workers will only restart on errors)
+# With logs endpoint called every 3 seconds, 1000 requests = ~50 minutes
+# Increased to prevent frequent restarts during active usage
+max_requests = 0  # Disable automatic restarts - let workers run until error
+max_requests_jitter = 0
 
 # Worker timeout for handling requests
 # worker_tmp_dir - leave as default (None) for portability

@@ -119,6 +119,30 @@ def health_check_early():
 # Note: Root route '/' will be defined later for the dashboard
 # Health endpoints above are registered first to ensure they work immediately
 
+# Global error handler to prevent worker crashes from unhandled exceptions
+@app.errorhandler(Exception)
+def handle_unhandled_exception(e):
+    """Catch all unhandled exceptions to prevent worker crashes"""
+    # Don't handle errors for health endpoint - let it fail fast if needed
+    from flask import request
+    if request.path in ['/health', '/healthz']:
+        raise  # Re-raise for health endpoints
+    
+    import traceback
+    error_traceback = traceback.format_exc()
+    logger.error(f"[UNHANDLED ERROR] {type(e).__name__}: {str(e)}\n{error_traceback}")
+    
+    # Return error response instead of crashing worker
+    try:
+        return jsonify({
+            'success': False,
+            'error': f'Internal server error: {str(e)}',
+            'error_type': type(e).__name__
+        }), 500
+    except:
+        # If jsonify fails, return plain text
+        return f'Internal server error: {str(e)}', 500
+
 # Initialize basic logging early (before environment detection)
 # Full logging setup with file handler will be done later
 logging.basicConfig(
@@ -1873,8 +1897,13 @@ def get_live_trader_logs():
         
         # STEP 1: Check subprocess output buffer FIRST (instant - in-memory)
         # This is the fastest source and contains the most recent logs
-        with strategy_output_lock:
-            subprocess_logs = list(strategy_output_buffer[-200:])  # Copy last 200 lines
+        try:
+            global strategy_output_lock, strategy_output_buffer
+            with strategy_output_lock:
+                subprocess_logs = list(strategy_output_buffer[-200:]) if strategy_output_buffer else []
+        except (NameError, AttributeError, RuntimeError) as e:
+            logging.debug(f"[LOGS] Error accessing global buffer: {e}")
+            subprocess_logs = []
         
         if subprocess_logs:
             logs = subprocess_logs
@@ -1888,11 +1917,16 @@ def get_live_trader_logs():
         
         # STEP 2: Check per-session manager buffer (also in-memory)
         # Get manager quickly using direct dict access
-        device_id = session.get('saas_device_id')
-        manager_key = f"{broker_id}_{device_id}"
-        
-        with _strategy_managers_lock:
-            manager = _strategy_managers.get(manager_key)
+        try:
+            device_id = session.get('saas_device_id')
+            manager_key = f"{broker_id}_{device_id}" if device_id else broker_id
+            
+            global _strategy_managers_lock, _strategy_managers
+            with _strategy_managers_lock:
+                manager = _strategy_managers.get(manager_key)
+        except (NameError, AttributeError, RuntimeError) as e:
+            logging.debug(f"[LOGS] Error accessing strategy managers: {e}")
+            manager = None
         
         if manager:
             buffer_logs = manager.get_logs(max_lines=200)
@@ -1965,14 +1999,22 @@ def get_live_trader_logs():
         
         # STEP 4: No logs found - return helpful message
         strategy_status = "not running"
-        if strategy_process is not None:
-            try:
-                if strategy_process.poll() is None:
-                    strategy_status = f"running (PID: {strategy_process.pid})"
-                else:
-                    strategy_status = f"stopped (exit code: {strategy_process.returncode})"
-            except:
-                pass
+        try:
+            # Check global strategy_process safely
+            global strategy_process
+            if strategy_process is not None:
+                try:
+                    poll_result = strategy_process.poll()
+                    if poll_result is None:
+                        strategy_status = f"running (PID: {getattr(strategy_process, 'pid', 'unknown')})"
+                    else:
+                        strategy_status = f"stopped (exit code: {getattr(strategy_process, 'returncode', 'unknown')})"
+                except (AttributeError, OSError, ValueError) as e:
+                    logging.debug(f"[LOGS] Error checking strategy_process: {e}")
+                    strategy_status = "status unknown"
+        except Exception as e:
+            logging.debug(f"[LOGS] Error accessing strategy_process: {e}")
+            strategy_status = "status unknown"
         
         return jsonify({
             'success': True,
@@ -1986,11 +2028,16 @@ def get_live_trader_logs():
             'message': 'No logs found - strategy may not have started yet'
         })
     except Exception as e:
-        logging.error(f"[LOGS] Error: {e}")
+        # Log full traceback for debugging, but don't crash the worker
+        import traceback
+        error_traceback = traceback.format_exc()
+        logging.error(f"[LOGS] Error in get_live_trader_logs: {e}\n{error_traceback}")
+        
+        # Return error response without crashing worker
         return jsonify({
             'success': False,
-            'error': str(e),
-            'logs': [f'[ERROR] {str(e)}'],
+            'error': f'Error retrieving logs: {str(e)}',
+            'logs': [f'[ERROR] Failed to retrieve logs: {str(e)}'],
             'log_file_path': None
         }), 500
 
