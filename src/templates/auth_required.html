@@ -96,9 +96,15 @@
         <p class="message">
             {{ message or 'Navigate through main application' }}
         </p>
-        <a href="/" class="btn">
+        {% if main_app_url %}
+        <a href="{{ main_app_url }}" class="btn" target="_blank">
             <i class="fas fa-home"></i> Go to Main Application
         </a>
+        {% else %}
+        <a href="/" class="btn">
+            <i class="fas fa-home"></i> Go to Dashboard
+        </a>
+        {% endif %}
     </div>
 </body>
 </html>

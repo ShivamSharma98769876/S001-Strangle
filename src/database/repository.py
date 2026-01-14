@@ -24,6 +24,18 @@ class PositionRepository:
         session.add(position)
         session.commit()
         session.refresh(position)
+        
+        # Invalidate position cache
+        try:
+            from .shared_data_service import SharedDataService
+            shared_data = SharedDataService(self.db_manager)
+            broker_id = position_data.get('broker_id')
+            if broker_id:
+                shared_data.invalidate_position_cache(broker_id)
+        except Exception as cache_error:
+            # Don't fail position creation if cache invalidation fails
+            logger.debug(f"Cache invalidation failed (non-critical): {cache_error}")
+        
         return position
     
     def get_active_positions(self, session: Session, broker_id: str) -> List[Position]:
@@ -75,6 +87,22 @@ class TradeRepository:
         session.add(trade)
         session.commit()
         session.refresh(trade)
+        
+        # Invalidate trade cache
+        try:
+            from .shared_data_service import SharedDataService
+            shared_data = SharedDataService(self.db_manager)
+            broker_id = trade_data.get('broker_id')
+            if broker_id:
+                # Invalidate cache for the trade date
+                if hasattr(trade, 'exit_time') and trade.exit_time:
+                    from datetime import date as date_type
+                    trade_date = trade.exit_time.date() if isinstance(trade.exit_time, datetime) else trade.exit_time
+                    shared_data.invalidate_trade_cache(broker_id, trade_date=trade_date)
+        except Exception as cache_error:
+            # Don't fail trade creation if cache invalidation fails
+            logger.debug(f"Cache invalidation failed (non-critical): {cache_error}")
+        
         return trade
     
     def get_trades_by_date(self, session: Session, broker_id: str, trade_date: date, show_all: bool = False) -> List[Trade]:

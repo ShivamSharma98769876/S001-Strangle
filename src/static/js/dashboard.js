@@ -506,6 +506,66 @@ async function updateStatus() {
     }
 }
 
+// Sync orders from Zerodha and create trade records
+async function syncOrdersFromZerodha() {
+    if (!isAuthenticated) {
+        showNotification('Please authenticate first before syncing orders', 'error');
+        return;
+    }
+    
+    if (!confirm('This will fetch all completed orders from Zerodha and create trade records. Continue?')) {
+        return;
+    }
+    
+    const btn = document.getElementById('syncOrdersBtn');
+    if (!btn) {
+        console.error('Sync orders button not found');
+        return;
+    }
+    
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Syncing...';
+    
+    try {
+        const response = await fetch('/api/sync/orders', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({}),
+            credentials: 'include'
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await safeJsonResponse(response);
+        
+        if (data.success) {
+            showNotification(
+                `✅ Order sync completed! Created ${data.trades_created || 0} trade records${data.positions_closed ? `, ${data.positions_closed} positions marked as closed` : ''}`,
+                'success'
+            );
+            // Refresh trades immediately after sync
+            setTimeout(() => {
+                updateTrades(); // Fetch today's trades after sync
+                updateStatus();
+            }, 1000);
+        } else {
+            showNotification(`Failed to sync orders: ${data.error || 'Unknown error'}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error syncing orders:', error);
+        showNotification('Error syncing orders: ' + (error.message || 'Unknown error'), 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
+}
+
+// Make function globally available
+window.syncOrdersFromZerodha = syncOrdersFromZerodha;
+
 // Update trades
 async function updateTrades() {
     // Don't update if not authenticated
@@ -514,12 +574,8 @@ async function updateTrades() {
     }
     
     try {
-        const showAll = document.getElementById('showAllTrades')?.checked || false;
-        const dateFilter = document.getElementById('tradeDateFilter')?.value || '';
-        
-        let url = '/api/dashboard/trade-history?';
-        if (showAll) url += 'all=true&';
-        if (dateFilter) url += `date=${dateFilter}`;
+        // Always fetch today's trades (closed trades + open positions)
+        const url = '/api/dashboard/trade-history';
         
         const response = await cachedFetch(url);
         if (!response.ok) {
@@ -572,26 +628,43 @@ async function updateTrades() {
     }
 }
 
-// Render trades table
+// Render trades table (shows both closed trades and open positions for today)
 function renderTrades(trades) {
     const tbody = document.getElementById('tradesBody');
     if (!tbody) return;
     
     if (trades.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No trades found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No trades today</td></tr>';
         return;
     }
     
-    tbody.innerHTML = trades.map(trade => {
+    // Sort trades: open positions first, then closed trades by exit time
+    const sortedTrades = [...trades].sort((a, b) => {
+        const aStatus = a.status || 'closed';
+        const bStatus = b.status || 'closed';
+        if (aStatus === 'open' && bStatus === 'closed') return -1;
+        if (aStatus === 'closed' && bStatus === 'open') return 1;
+        // Both same status, sort by exit time (closed) or entry time (open)
+        if (aStatus === 'closed' && b.exit_time) {
+            return new Date(b.exit_time) - new Date(a.exit_time);
+        }
+        return new Date(b.entry_time) - new Date(a.entry_time);
+    });
+    
+    tbody.innerHTML = sortedTrades.map(trade => {
         const pnlColor = trade.pnl >= 0 ? 'positive' : 'negative';
         const pnlSign = trade.pnl >= 0 ? '+' : '';
+        const isOpen = trade.status === 'open';
+        const exitTimeDisplay = isOpen ? '<span style="color: #10b981; font-weight: 600;">OPEN</span>' : formatDateTime(trade.exit_time);
+        const exitPriceDisplay = isOpen ? `<span style="color: #10b981;">${formatCurrency(trade.exit_price)}</span>` : formatCurrency(trade.exit_price);
+        
         return `
-            <tr>
+            <tr style="${isOpen ? 'background-color: rgba(16, 185, 129, 0.05);' : ''}">
                 <td>${trade.symbol || '-'}</td>
                 <td>${formatDateTime(trade.entry_time)}</td>
-                <td>${formatDateTime(trade.exit_time)}</td>
+                <td>${exitTimeDisplay}</td>
                 <td>${formatCurrency(trade.entry_price)}</td>
-                <td>${formatCurrency(trade.exit_price)}</td>
+                <td>${exitPriceDisplay}</td>
                 <td>${trade.quantity || '-'}</td>
                 <td class="${pnlColor}">${pnlSign}${formatCurrency(trade.pnl)}</td>
                 <td>${trade.trade_type || '-'}</td>
@@ -600,13 +673,25 @@ function renderTrades(trades) {
     }).join('');
 }
 
-// Update trade summary
+// Update trade summary (includes both closed trades and open positions for today)
 function updateTradeSummary(trades) {
+    // Separate closed trades and open positions
+    const closedTrades = trades.filter(t => t.status === 'closed' || !t.status);
+    const openPositions = trades.filter(t => t.status === 'open');
+    
+    // Total trades includes both closed and open
     const totalTrades = trades.length;
+    
+    // Calculate profit/loss from all trades (closed + open)
     const totalProfit = trades.filter(t => t.pnl > 0).reduce((sum, t) => sum + t.pnl, 0);
     const totalLoss = trades.filter(t => t.pnl < 0).reduce((sum, t) => sum + Math.abs(t.pnl), 0);
     const netPnl = trades.reduce((sum, t) => sum + t.pnl, 0);
-    const winRate = totalTrades > 0 ? (trades.filter(t => t.pnl > 0).length / totalTrades * 100).toFixed(1) : 0;
+    
+    // Win rate calculated only from closed trades
+    const closedTradesCount = closedTrades.length;
+    const winRate = closedTradesCount > 0 
+        ? (closedTrades.filter(t => t.pnl > 0).length / closedTradesCount * 100).toFixed(1) 
+        : 0;
     
     const totalTradesEl = document.getElementById('totalTrades');
     if (totalTradesEl) totalTradesEl.textContent = totalTrades;
@@ -674,6 +759,21 @@ function updateCumulativePnlMetrics(data) {
         'day': data.day || 0
     };
     
+    // Update year and month labels dynamically
+    if (data.current_year) {
+        const yearLabelEl = document.getElementById('label-year');
+        if (yearLabelEl) {
+            yearLabelEl.textContent = `Year (${data.current_year})`;
+        }
+    }
+    
+    if (data.current_month) {
+        const monthLabelEl = document.getElementById('label-month');
+        if (monthLabelEl) {
+            monthLabelEl.textContent = `Month (${data.current_month})`;
+        }
+    }
+    
     Object.keys(metrics).forEach(key => {
         const valueEl = document.getElementById(`value-${key}`);
         if (valueEl) {
@@ -734,10 +834,10 @@ function updateCumulativePnlChart(data) {
     }
 }
 
-// Toggle trade filter
-function toggleTradeFilter() {
-    updateTrades();
-}
+// Toggle trade filter (removed - always shows today's trades)
+// function toggleTradeFilter() {
+//     updateTrades();
+// }
 
 // Start updates
 function startUpdates() {
@@ -1140,6 +1240,21 @@ async function updateCumulativePnl() {
                     day: data.day || 0,
                     todayPnl: data.day || 0
                 };
+                
+                // Update year and month labels dynamically
+                if (data.current_year) {
+                    const yearLabelEl = document.getElementById('label-year');
+                    if (yearLabelEl) {
+                        yearLabelEl.textContent = `Year (${data.current_year})`;
+                    }
+                }
+                
+                if (data.current_month) {
+                    const monthLabelEl = document.getElementById('label-month');
+                    if (monthLabelEl) {
+                        monthLabelEl.textContent = `Month (${data.current_month})`;
+                    }
+                }
                 
                 // Update metric displays
                 updateMetricDisplay('value-all-time', cumulativePnlData.allTime);
@@ -1788,16 +1903,8 @@ function renderPnlCalendar(startDate, endDate) {
 
 // Setup event listeners
 function setupEventListeners() {
-    const tradeDateFilter = document.getElementById('tradeDateFilter');
-    if (tradeDateFilter) {
-        tradeDateFilter.value = new Date().toISOString().split('T')[0];
-        tradeDateFilter.addEventListener('change', updateTrades);
-    }
-    
-    const showAllTrades = document.getElementById('showAllTrades');
-    if (showAllTrades) {
-        showAllTrades.addEventListener('change', toggleTradeFilter);
-    }
+    // Trade history filters removed - always shows today's trades
+    // No event listeners needed for removed filters
 }
 
 // Helper function to safely parse JSON responses

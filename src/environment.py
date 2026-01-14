@@ -514,8 +514,14 @@ class AzureBlobStorageHandler(logging.Handler):
     
     def close(self):
         """Close the handler and flush any remaining logs"""
-        self.flush()
-        super().close()
+        try:
+            # Force flush all remaining logs before closing
+            self.flush(force=True)
+            print(f"[AZURE BLOB] Handler closed and logs flushed: {self.container_name}/{self.blob_path}")
+        except Exception as e:
+            print(f"[AZURE BLOB] Error during close/flush: {e}")
+        finally:
+            super().close()
 
 def test_azure_blob_access(connection_string=None, container_name=None):
     """
@@ -690,10 +696,10 @@ def _get_azure_blob_config():
             AZURE_BLOB_ACCOUNT_NAME
         )
 
-def setup_azure_blob_logging(account_name=None, logger_name='root', streaming_mode=False, skip_verification=False):
+def setup_azure_blob_logging(account_name=None, logger_name='root', streaming_mode=False, skip_verification=False, broker_id=None):
     """
     Setup Azure Blob Storage logging handler
-    Creates logs in Azure Blob Storage with folder structure: {account_name}/logs/{filename}.log
+    Creates logs in Azure Blob Storage with folder structure: {account_name or broker_id}/logs/{filename}.log
     
     All Azure Blob Storage parameters are read from environment variables.
     Set these in Azure Portal > App Service > Configuration > Application settings:
@@ -703,10 +709,17 @@ def setup_azure_blob_logging(account_name=None, logger_name='root', streaming_mo
       - AZURE_BLOB_LOGGING_ENABLED (true/yes/1/on to enable)
     
     Args:
-        account_name: Account name for folder structure
+        account_name: Account name for folder structure (deprecated, use broker_id)
         logger_name: Logger name to attach handler to
-        streaming_mode: Enable real-time streaming logs
+        streaming_mode: Enable real-time streaming logs (recommended for log retention)
         skip_verification: If True, skip time-consuming verification (useful for fast startup)
+        broker_id: Broker ID for multi-tenant log isolation (preferred over account_name)
+    
+    IMPORTANT: Logs are preserved across deployments by:
+    1. Storing in Azure Blob Storage (persistent storage)
+    2. Appending to existing blobs (never overwrites)
+    3. Organized by broker_id/account for multi-tenant isolation
+    4. Flushed on application shutdown via registered handlers
     """
     try:
         # Add prefix to identify if this is from trading strategy (has account_name) vs dashboard (no account_name)
@@ -765,26 +778,36 @@ def setup_azure_blob_logging(account_name=None, logger_name='root', streaming_mo
         logger = logging.getLogger(logger_name)
         
         # Determine blob path
-        # IMPORTANT: Always create account folder structure, even if account_name is None or empty
-        # In Azure, if account_name is not provided, use a default folder name
+        # IMPORTANT: Use broker_id for multi-tenant log isolation (preferred)
+        # Fallback to account_name if broker_id not provided
+        # Always create account folder structure for proper organization
         
-        # Check if account_name is valid (not None and not empty string)
-        if account_name and str(account_name).strip():
-            sanitized_account = sanitize_account_name_for_filename(str(account_name).strip())
+        # Priority: broker_id > account_name > default
+        identifier = broker_id or account_name
+        
+        if identifier and str(identifier).strip():
+            # Use broker_id if available (for multi-tenant isolation)
+            if broker_id:
+                sanitized_account = str(broker_id).strip()
+                # Sanitize broker_id for filename safety
+                sanitized_account = sanitize_account_name_for_filename(sanitized_account)
+                print(f"{prefix} [AZURE BLOB] Using broker_id for log isolation: '{broker_id}' -> '{sanitized_account}'")
+            else:
+                sanitized_account = sanitize_account_name_for_filename(str(account_name).strip())
+                print(f"{prefix} [AZURE BLOB] Using account_name: '{account_name}' -> '{sanitized_account}'")
+            
             # Validate sanitized account name is not empty
             if not sanitized_account or sanitized_account.strip() == '':
-                print(f"{prefix} [AZURE BLOB] WARNING: Account name '{account_name}' sanitized to empty string. Using default.")
+                print(f"{prefix} [AZURE BLOB] WARNING: Identifier '{identifier}' sanitized to empty string. Using default.")
                 sanitized_account = "default_account"
-            else:
-                print(f"{prefix} [AZURE BLOB] Account name provided: '{account_name}' -> sanitized: '{sanitized_account}'")
         else:
-            # In Azure, if no account_name provided, use default folder
+            # In Azure, if no identifier provided, use default folder
             if is_azure_environment():
                 sanitized_account = "default_account"
-                print(f"{prefix} [AZURE BLOB] WARNING: No account_name provided in Azure. Using default folder: '{sanitized_account}'")
+                print(f"{prefix} [AZURE BLOB] WARNING: No broker_id or account_name provided in Azure. Using default folder: '{sanitized_account}'")
             else:
                 sanitized_account = "trading"
-                print(f"{prefix} [AZURE BLOB] No account_name provided. Using folder: '{sanitized_account}'")
+                print(f"{prefix} [AZURE BLOB] No identifier provided. Using folder: '{sanitized_account}'")
         
         # Ensure sanitized_account is not empty (final safety check)
         if not sanitized_account or sanitized_account.strip() == '':
@@ -829,6 +852,30 @@ def setup_azure_blob_logging(account_name=None, logger_name='root', streaming_mo
         
         # Add handler to logger
         logger.addHandler(blob_handler)
+        
+        # Register handler for shutdown flush (if function exists)
+        # This ensures logs are flushed on deployment/shutdown
+        try:
+            # Try to import register function from config_dashboard
+            try:
+                from src.config_dashboard import register_blob_handler
+                register_blob_handler(blob_handler)
+                print(f"{prefix} [AZURE BLOB] ✓ Handler registered for log retention on shutdown")
+            except ImportError:
+                # If config_dashboard not available (e.g., when running strategy standalone),
+                # register directly in this module
+                try:
+                    # Create a simple registration mechanism if config_dashboard not available
+                    if not hasattr(setup_azure_blob_logging, '_registered_handlers'):
+                        setup_azure_blob_logging._registered_handlers = []
+                    if blob_handler not in setup_azure_blob_logging._registered_handlers:
+                        setup_azure_blob_logging._registered_handlers.append(blob_handler)
+                        print(f"{prefix} [AZURE BLOB] ✓ Handler registered locally for log retention")
+                except Exception:
+                    pass  # Non-critical - logs will still be flushed on handler.close()
+        except Exception as reg_error:
+            print(f"{prefix} [AZURE BLOB] Warning: Could not register handler (non-critical): {reg_error}")
+            # Non-critical - handler.close() will still flush logs
         
         # Write initial test message and verify (skip verification if fast startup needed)
         prefix = "[STRATEGY]" if account_name else "[DASHBOARD]"
@@ -1054,11 +1101,20 @@ def setup_azure_logging(logger_name='root', account_name=None):
         # Also setup Azure Blob Storage logging for persistence across deployments
         # This ensures logs survive even when /tmp is cleared
         try:
+            # Try to get broker_id from session if available (for multi-tenant log isolation)
+            broker_id = None
+            try:
+                from src.security.saas_session_manager import SaaSSessionManager
+                broker_id = SaaSSessionManager.get_broker_id()
+            except:
+                pass
+            
             blob_handler, blob_path = setup_azure_blob_logging(
                 account_name=account_name,
                 logger_name=logger_name,
-                streaming_mode=True,  # Real-time streaming to blob
-                skip_verification=True  # Fast startup
+                streaming_mode=True,  # Real-time streaming to blob for log retention
+                skip_verification=True,  # Fast startup
+                broker_id=broker_id  # Use broker_id for multi-tenant log isolation
             )
             if blob_handler:
                 print(f"{prefix} [LOG SETUP] ✓ Azure Blob Storage logging enabled for persistence: {blob_path}")

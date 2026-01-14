@@ -278,13 +278,23 @@ def setup_dashboard_blob_logging():
             if account_name_for_logging:
                 print(f"[STARTUP] Account name for logging: {account_name_for_logging}")
             
+            # Get broker_id for log organization (preferred for multi-tenant isolation)
+            broker_id_for_logging = None
+            try:
+                broker_id_for_logging = SaaSSessionManager.get_broker_id()
+                if broker_id_for_logging:
+                    print(f"[STARTUP] Using broker_id for log organization: {broker_id_for_logging}")
+            except:
+                pass
+            
             # Use skip_verification=True for fast startup (prevents 504 timeout)
             # Verification will happen on first log write
             blob_handler, blob_path = setup_azure_blob_logging(
                 account_name=account_name_for_logging, 
                 logger_name=__name__,
-                streaming_mode=True,  # Enable streaming logs
-                skip_verification=True  # Skip network calls during startup (fast startup)
+                streaming_mode=True,  # Enable streaming logs for immediate persistence
+                skip_verification=True,  # Skip network calls during startup (fast startup)
+                broker_id=broker_id_for_logging  # Use broker_id for multi-tenant log isolation
             )
             if blob_handler:
                 logger.info(f"[STARTUP] Azure Blob Storage logging enabled: {blob_path}")
@@ -316,6 +326,81 @@ blob_setup_thread = threading.Thread(target=setup_blob_logging_lazy, daemon=True
 blob_setup_thread.start()
 
 logger.info("[DASHBOARD] Dashboard application initialized (Azure Blob Storage setup in background)")
+
+# ===== LOG RETENTION: Ensure logs are flushed on shutdown/deployment =====
+import atexit
+import signal
+
+# Track all Azure Blob handlers for shutdown flush
+_azure_blob_handlers = []
+_handler_lock = threading.Lock()
+
+def register_blob_handler(handler):
+    """Register an Azure Blob handler for shutdown flush"""
+    with _handler_lock:
+        if handler not in _azure_blob_handlers:
+            _azure_blob_handlers.append(handler)
+            logger.debug(f"[LOG RETENTION] Registered blob handler: {handler.blob_path}")
+
+def flush_all_blob_handlers():
+    """Flush all registered Azure Blob handlers - called on shutdown"""
+    with _handler_lock:
+        if not _azure_blob_handlers:
+            return
+        
+        logger.info(f"[LOG RETENTION] Flushing {len(_azure_blob_handlers)} blob handlers before shutdown...")
+        for handler in _azure_blob_handlers:
+            try:
+                if hasattr(handler, 'flush'):
+                    handler.flush(force=True)
+                    logger.debug(f"[LOG RETENTION] Flushed handler: {handler.blob_path}")
+            except Exception as e:
+                logger.warning(f"[LOG RETENTION] Error flushing handler {handler.blob_path}: {e}")
+        logger.info("[LOG RETENTION] All blob handlers flushed successfully")
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals (SIGTERM, SIGINT)"""
+    logger.info(f"[LOG RETENTION] Received signal {signum}, flushing logs...")
+    flush_all_blob_handlers()
+    sys.exit(0)
+
+# Register shutdown handlers
+atexit.register(flush_all_blob_handlers)
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+
+# Flask teardown handler to flush logs after each request (for buffered mode)
+@app.teardown_appcontext
+def flush_logs_on_request_end(error):
+    """Flush logs after each request completes (for buffered blob handlers)"""
+    # Only flush if there are handlers registered
+    with _handler_lock:
+        if _azure_blob_handlers:
+            # Flush all handlers (they will check their own buffer state)
+            for handler in _azure_blob_handlers:
+                try:
+                    if hasattr(handler, 'flush') and not handler.streaming_mode:
+                        handler.flush()
+                except Exception:
+                    pass  # Ignore errors during teardown
+
+logger.info("[LOG RETENTION] Shutdown handlers registered for log preservation")
+# ===== END LOG RETENTION =====
+
+# ===== MAIN APPLICATION URL CONFIGURATION =====
+def get_main_app_url() -> str:
+    """
+    Get main application URL from environment variable.
+    Defaults to StockSage.trade if not configured.
+    """
+    main_app_url = os.getenv('MAIN_APP_URL')
+    if not main_app_url:
+        # Use StockSage.trade as default
+        main_app_url = "https://StockSage.trade"
+        logger.info(f"[CONFIG] MAIN_APP_URL not set, using default: {main_app_url}")
+        logger.info("[CONFIG] To override, set MAIN_APP_URL in Azure Portal > Configuration > Application settings")
+    return main_app_url
+# ===== END MAIN APPLICATION URL CONFIGURATION =====
 
 # ===== JWT TOKEN VALIDATION FUNCTIONS =====
 # Based on disciplined-Trader implementation for secure SSO token handling
@@ -417,13 +502,17 @@ def require_jwt_token_in_cloud() -> Tuple[bool, Optional[str], Optional[dict]]:
     # Check for sso_token in query string OR headers (for flexibility)
     sso_token = request.args.get('sso_token') or request.headers.get('X-SSO-Token')
     if not sso_token:
-        main_app_url = os.getenv('MAIN_APP_URL', 'https://a000-main-app-g5f2byheauhyeudv.southindia-01.azurewebsites.net')
+        main_app_url = get_main_app_url()
+        if not main_app_url:
+            return False, "JWT token required. Please navigate through the main application to authenticate.", None
         return False, f"Please Navigate through {main_app_url}", None
     
     # Validate the token from URL/headers
     is_valid, error_msg, payload = validate_jwt_token_for_cloud(sso_token)
     if not is_valid:
-        main_app_url = os.getenv('MAIN_APP_URL', 'https://a000-main-app-g5f2byheauhyeudv.southindia-01.azurewebsites.net')
+        main_app_url = get_main_app_url()
+        if not main_app_url:
+            return False, error_msg or "JWT token required. Please navigate through the main application to authenticate.", None
         return False, error_msg or f"Please Navigate through {main_app_url}", None
     
     # Store valid JWT token in session for subsequent requests
@@ -503,9 +592,9 @@ def require_authentication_page(f):
             jwt_valid, jwt_error, jwt_payload = require_jwt_token_in_cloud()
             if not jwt_valid:
                 logging.warning(f"[AUTH] JWT token validation failed for page {request.path} from {request.remote_addr}: {jwt_error}")
-                main_app_url = os.getenv('MAIN_APP_URL', 'https://a000-main-app-g5f2byheauhyeudv.southindia-01.azurewebsites.net')
+                main_app_url = get_main_app_url()
                 return render_template('auth_required.html', 
-                                     message=jwt_error or f'JWT token required. Please navigate through {main_app_url}',
+                                     message=jwt_error or f'JWT token required. Please navigate through {main_app_url if main_app_url else "the main application"}',
                                      main_app_url=main_app_url), 401
         
         # STRICT authentication check for all environments (local and cloud)
@@ -561,70 +650,66 @@ def admin_panel():
 # Session management: Extend session on each request
 @app.before_request
 def check_session_expiration():
-    """Check and extend session on each request, enforce authentication on cloud for protected routes"""
-    # List of routes that require authentication (especially on cloud)
-    protected_routes = ['/live/', '/admin/panel', '/api/live-trader/', '/api/strategy/', '/api/trading/']
+    """Check and extend session on each request, enforce JWT authentication on cloud for ALL routes"""
+    # List of public routes that should NEVER require authentication (health checks only)
+    public_routes = ['/health', '/healthz', '/favicon.ico']
     
-    # List of public routes that should NEVER require authentication (used for authentication itself)
-    public_routes = ['/api/auth/', '/health', '/healthz', '/', '/credentials']
-    
-    # Skip authentication check for public routes
-    is_public = any(request.path.startswith(route) for route in public_routes)
+    # Skip authentication check for public routes (health checks)
+    is_public = any(request.path == route or request.path.startswith(route + '/') for route in public_routes)
     if is_public:
         # Still extend session if authenticated, but don't block
         if SaaSSessionManager.is_authenticated():
             SaaSSessionManager.extend_session()
         return None  # Continue to route handler
     
-    # Check if this is a protected route
-    is_protected = any(request.path.startswith(route) for route in protected_routes)
-    
-    # On cloud/production, strictly enforce authentication for protected routes
-    if IS_PRODUCTION and is_protected:
+    # On cloud/production, enforce JWT token for ALL routes (except public routes above)
+    if IS_PRODUCTION:
         # First, validate JWT token in cloud environment
         jwt_valid, jwt_error, jwt_payload = require_jwt_token_in_cloud()
         if not jwt_valid:
             logging.warning(f"[AUTH] JWT token validation failed for {request.path} from {request.remote_addr}: {jwt_error}")
-            main_app_url = os.getenv('MAIN_APP_URL', 'https://a000-main-app-g5f2byheauhyeudv.southindia-01.azurewebsites.net')
+            main_app_url = get_main_app_url()
+            error_msg = jwt_error or f'JWT token required. Please navigate through {main_app_url if main_app_url else "the main application"}'
             if request.path.startswith('/api/'):
                 return jsonify({
                     'success': False,
-                    'error': jwt_error or f'Please Navigate through {main_app_url}',
+                    'error': error_msg,
                     'requires_auth': True,
-                    'main_app_url': main_app_url
+                    'main_app_url': main_app_url or ''
                 }), 401
             else:
                 return render_template('auth_required.html', 
-                                     message=jwt_error or f'Please Navigate through {main_app_url}',
+                                     message=error_msg,
                                      main_app_url=main_app_url), 401
         
-        # Then check SaaS session authentication
-        if not SaaSSessionManager.is_authenticated():
-            logging.warning(f"[AUTH] Unauthorized access attempt to protected route {request.path} from {request.remote_addr} on cloud")
-            # Return JSON for API routes, HTML for page routes
-            if request.path.startswith('/api/'):
-                return jsonify({
-                    'success': False,
-                    'error': 'Navigate through main application',
-                    'requires_auth': True
-                }), 401
-            else:
-                return render_template('auth_required.html', 
-                                     message='Navigate through main application'), 401
-        
-        # Additional check: ensure access token exists
-        creds = SaaSSessionManager.get_credentials()
-        if not creds.get('access_token'):
-            logging.warning(f"[AUTH] Missing access token for protected route {request.path} from {request.remote_addr} on cloud")
-            if request.path.startswith('/api/'):
-                return jsonify({
-                    'success': False,
-                    'error': 'Navigate through main application',
-                    'requires_auth': True
-                }), 401
-            else:
-                return render_template('auth_required.html', 
-                                     message='Invalid session. Access token not found. Please re-authenticate through the main application.'), 401
+        # Then check SaaS session authentication (except for auth endpoints which handle their own auth)
+        if not request.path.startswith('/api/auth/'):
+            if not SaaSSessionManager.is_authenticated():
+                logging.warning(f"[AUTH] Unauthorized access attempt to {request.path} from {request.remote_addr} on cloud")
+                # Return JSON for API routes, HTML for page routes
+                if request.path.startswith('/api/'):
+                    return jsonify({
+                        'success': False,
+                        'error': 'Authentication required. Please navigate through main application.',
+                        'requires_auth': True
+                    }), 401
+                else:
+                    return render_template('auth_required.html', 
+                                         message='Authentication required. Please navigate through main application.'), 401
+            
+            # Additional check: ensure access token exists (except for auth endpoints)
+            creds = SaaSSessionManager.get_credentials()
+            if not creds.get('access_token'):
+                logging.warning(f"[AUTH] Missing access token for {request.path} from {request.remote_addr} on cloud")
+                if request.path.startswith('/api/'):
+                    return jsonify({
+                        'success': False,
+                        'error': 'Invalid session. Access token not found. Please re-authenticate through the main application.',
+                        'requires_auth': True
+                    }), 401
+                else:
+                    return render_template('auth_required.html', 
+                                         message='Invalid session. Access token not found. Please re-authenticate through the main application.'), 401
     
     # Extend session on activity if authenticated
     if SaaSSessionManager.is_authenticated():
@@ -866,10 +951,13 @@ def reconnect_kite_client():
                             handler.close()
                     
                     # Setup new blob handler with correct account name
+                    # Get broker_id for log organization
+                    broker_id = SaaSSessionManager.get_broker_id()
                     blob_handler, blob_path = setup_azure_blob_logging(
                         account_name=account_holder_name,
                         logger_name=__name__,
-                        streaming_mode=True
+                        streaming_mode=True,  # Real-time streaming for log retention
+                        broker_id=broker_id  # Use broker_id for multi-tenant log isolation
                     )
                     if blob_handler:
                         logger.info(f"[RECONNECT] Azure Blob Storage logging updated: {blob_path}")
@@ -896,8 +984,9 @@ def favicon():
 # This ensures it's available immediately when the app is imported
 
 @app.route('/')
+@require_authentication_page
 def dashboard():
-    """Main dashboard page - Zero Touch Strangle landing page"""
+    """Main dashboard page - Zero Touch Strangle landing page - Requires JWT token in cloud"""
     import os
     from environment import is_azure_environment
     
@@ -925,11 +1014,13 @@ def dashboard():
                          account_holder_name=account_name_display)
 
 @app.route('/credentials')
+@require_authentication_page
 def credentials_input():
-    """Credentials input page for Azure"""
+    """Credentials input page for Azure - Requires JWT token in cloud"""
     return render_template('credentials_input.html')
 
 @app.route('/api/config/current')
+@require_authentication
 def get_current_config():
     """Get current configuration values"""
     try:
@@ -993,6 +1084,7 @@ def get_current_config():
         }), 500
 
 @app.route('/api/config/lot-size', methods=['GET'])
+@require_authentication
 def get_lot_size():
     """Get lot size from config"""
     try:
@@ -1008,6 +1100,7 @@ def get_lot_size():
         }), 500
 
 @app.route('/api/config/history')
+@require_authentication
 def get_config_history():
     """Get configuration change history"""
     try:
@@ -1031,6 +1124,7 @@ def get_config_history():
         }), 500
 
 @app.route('/api/config/update', methods=['POST'])
+@require_authentication
 def update_config():
     """Update configuration parameter"""
     try:
@@ -1122,6 +1216,7 @@ def update_config():
         }), 500
 
 @app.route('/api/config/export')
+@require_authentication
 def export_config():
     """Export configuration history"""
     try:
@@ -1146,6 +1241,7 @@ def export_config():
         }), 500
 
 @app.route('/api/trading/positions')
+@require_authentication
 def get_trading_positions():
     """Get current trading positions and P&L"""
     try:
@@ -1222,6 +1318,7 @@ def get_trading_positions():
         }), 500
 
 @app.route('/api/trading/set-credentials', methods=['POST'])
+@require_authentication
 def set_trading_credentials():
     """Set credentials for the main trading script (used on Azure)"""
     try:
@@ -1263,6 +1360,7 @@ def set_trading_credentials():
         }), 500
 
 @app.route('/api/trading/credentials-status', methods=['GET'])
+@require_authentication
 def get_credentials_status():
     """Check if credentials are set"""
     global trading_credentials
@@ -1272,6 +1370,7 @@ def get_credentials_status():
     })
 
 @app.route('/api/trading/get-credentials', methods=['GET'])
+@require_authentication
 def get_trading_credentials():
     """Get credentials for the main trading script (internal use)"""
     global trading_credentials
@@ -1292,6 +1391,7 @@ def get_trading_credentials():
         }), 404
 
 @app.route('/api/trading/status')
+@require_authentication
 def get_trading_status():
     """Get current trading status"""
     try:
@@ -1402,63 +1502,334 @@ def get_dashboard_metrics():
 @app.route('/api/dashboard/positions')
 @require_authentication
 def get_dashboard_positions():
-    """Get all positions (active and inactive) for dashboard"""
+    """Get all positions (active and inactive) from database with optional sync from API"""
+    global kite_client_global  # Declare global at function start
+    
     try:
-        global strategy_bot, kite_client_global
+        # Get broker_id from session
+        broker_id = SaaSSessionManager.get_broker_id()
+        if not broker_id:
+            return jsonify({
+                'status': 'error',
+                'message': 'Not authenticated'
+            }), 401
+        
+        # Check if sync is requested
+        sync = request.args.get('sync', 'false').lower() == 'true'
         
         positions = []
         total_pnl = 0.0
         
-        kite_client = None
-        if strategy_bot and hasattr(strategy_bot, 'kite_client'):
-            kite_client = strategy_bot.kite_client
-        elif kite_client_global:
-            kite_client = kite_client_global
-        
-        if kite_client and hasattr(kite_client, 'kite'):
+        # Try to sync positions from API if requested
+        if sync:
             try:
-                kite_positions = kite_client.kite.positions()
-                if kite_positions and 'net' in kite_positions:
-                    # Get all positions including inactive ones (quantity = 0)
-                    for pos in kite_positions['net']:
-                        # Include all positions, even with quantity 0 (inactive)
-                        pnl = pos.get('pnl', 0)
-                        total_pnl += pnl
-                        
-                        positions.append({
-                            'symbol': pos.get('tradingsymbol', 'N/A'),
-                            'exchange': pos.get('exchange', 'NFO'),
-                            'product': pos.get('product', 'NRML'),
-                            'entryPrice': pos.get('average_price', 0),
-                            'currentPrice': pos.get('last_price', 0),
-                            'quantity': pos.get('quantity', 0),
-                            'pnl': pnl,
-                            'pnlPercentage': pos.get('pnl_percentage', 0),
-                            'dayChange': pos.get('day_change', 0),
-                            'dayChangePercentage': pos.get('day_change_percentage', 0),
-                            'isActive': pos.get('quantity', 0) != 0
-                        })
-            except Exception as e:
-                print(f"Error fetching positions: {e}")
+                kite_client = kite_client_global
+                
+                if kite_client and hasattr(kite_client, 'kite'):
+                    from src.database.models import DatabaseManager
+                    from src.database.repository import PositionRepository, TradeRepository
+                    from src.database.shared_data_service import SharedDataService
+                    from src.api.position_sync import PositionSync
+                    
+                    db_manager = DatabaseManager()
+                    position_repo = PositionRepository(db_manager)
+                    trade_repo = TradeRepository(db_manager)
+                    
+                    position_sync = PositionSync(kite_client, position_repo, trade_repo)
+                    synced_positions = position_sync.sync_positions_from_api(broker_id)
+                    logger.info(f"Synced {len(synced_positions)} positions from API")
+                    
+                    # Cache is automatically invalidated by position_sync
+            except Exception as sync_error:
+                logger.warning(f"Position sync error (non-critical): {sync_error}")
+        
+        # Get positions from database (using cached service for performance)
+        try:
+            from src.database.models import DatabaseManager
+            from src.database.shared_data_service import SharedDataService
+            
+            db_manager = DatabaseManager()
+            shared_data = SharedDataService(db_manager)
+            
+            # Use cached positions query (2 second TTL) - reduces DB queries significantly
+            active_positions = shared_data.get_active_positions_cached(broker_id, ttl_seconds=2.0)
+                
+            for pos in active_positions:
+                pnl = pos.unrealized_pnl or 0.0
+                total_pnl += pnl
+                
+                positions.append({
+                    'symbol': pos.trading_symbol,
+                    'exchange': pos.exchange,
+                    'instrumentToken': pos.instrument_token,
+                    'entryPrice': pos.entry_price,
+                    'currentPrice': pos.current_price or pos.entry_price,
+                    'quantity': pos.quantity,
+                    'lotSize': pos.lot_size or 1,
+                    'pnl': pnl,
+                    'pnlPercentage': (pnl / (pos.entry_price * abs(pos.quantity) * (pos.lot_size or 1)) * 100) if pos.entry_price and pos.quantity else 0,
+                    'isActive': pos.is_active,
+                    'entryTime': pos.entry_time.isoformat() if pos.entry_time else None,
+                    'updatedAt': pos.updated_at.isoformat() if pos.updated_at else None
+                })
+        except Exception as db_error:
+            logger.warning(f"Error fetching positions from database: {db_error}")
+            # Fallback to API if database fails
+            kite_client = kite_client_global
+            
+            if kite_client and hasattr(kite_client, 'kite'):
+                try:
+                    kite_positions = kite_client.kite.positions()
+                    if kite_positions and 'net' in kite_positions:
+                        for pos in kite_positions['net']:
+                            pnl = pos.get('pnl', 0)
+                            total_pnl += pnl
+                            
+                            positions.append({
+                                'symbol': pos.get('tradingsymbol', 'N/A'),
+                                'exchange': pos.get('exchange', 'NFO'),
+                                'product': pos.get('product', 'NRML'),
+                                'entryPrice': pos.get('average_price', 0),
+                                'currentPrice': pos.get('last_price', 0),
+                                'quantity': pos.get('quantity', 0),
+                                'pnl': pnl,
+                                'pnlPercentage': pos.get('pnl_percentage', 0),
+                                'dayChange': pos.get('day_change', 0),
+                                'dayChangePercentage': pos.get('day_change_percentage', 0),
+                                'isActive': pos.get('quantity', 0) != 0
+                            })
+                except Exception as e:
+                    logger.error(f"Error fetching positions from API: {e}")
         
         return jsonify({
             'status': 'success',
             'positions': positions,
-            'totalPnl': round(total_pnl, 2)
+            'totalPnl': round(total_pnl, 2),
+            'count': len(positions)
         })
     except Exception as e:
+        logger.error(f"Error in get_dashboard_positions: {e}", exc_info=True)
         return jsonify({
             'status': 'error',
             'message': str(e)
         }), 500
 
+@app.route('/api/sync/positions', methods=['POST'])
+@require_authentication
+def sync_positions():
+    """Sync positions from Zerodha API to database"""
+    try:
+        # Get broker_id from session
+        broker_id = SaaSSessionManager.get_broker_id()
+        if not broker_id:
+            return jsonify({
+                'success': False,
+                'error': 'Not authenticated'
+            }), 401
+        
+        # Get credentials from session and ensure kite_client_global is initialized
+        creds = SaaSSessionManager.get_credentials()
+        if not creds.get('access_token') or not creds.get('api_key'):
+            return jsonify({
+                'success': False,
+                'error': 'Missing credentials. Please authenticate first.'
+            }), 401
+        
+        # Ensure kite_client_global is initialized from session credentials
+        global kite_client_global, kite_api_key, kite_api_secret
+        if not kite_client_global or not hasattr(kite_client_global, 'kite') or kite_client_global.access_token != creds.get('access_token'):
+            # Reinitialize kite client from session credentials
+            kite_api_key = creds.get('api_key', '')
+            kite_api_secret = creds.get('api_secret', '')
+            access_token = creds.get('access_token')
+            
+            if kite_api_key and access_token:
+                try:
+                    from src.kite_client import KiteClient
+                except ImportError:
+                    from kite_client import KiteClient
+                
+                kite_client_global = KiteClient(
+                    kite_api_key,
+                    kite_api_secret or '',
+                    access_token=access_token,
+                    account=creds.get('full_name', 'DASHBOARD')
+                )
+                logger.info("Kite client reinitialized from session credentials for position sync")
+        
+        kite_client = kite_client_global
+        
+        if not kite_client or not hasattr(kite_client, 'kite') or not kite_client.kite:
+            return jsonify({
+                'success': False,
+                'error': 'Kite client not available. Please authenticate first.'
+            }), 400
+        
+        from src.database.models import DatabaseManager
+        from src.database.repository import PositionRepository, TradeRepository
+        from src.database.shared_data_service import SharedDataService
+        from src.api.position_sync import PositionSync
+        
+        db_manager = DatabaseManager()
+        position_repo = PositionRepository(db_manager)
+        trade_repo = TradeRepository(db_manager)
+        shared_data = SharedDataService(db_manager)
+        
+        position_sync = PositionSync(kite_client, position_repo, trade_repo)
+        synced_positions = position_sync.sync_positions_from_api(broker_id)
+        
+        # Invalidate position cache after sync
+        shared_data.invalidate_position_cache(broker_id)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Synced {len(synced_positions)} positions',
+            'positions_synced': len(synced_positions)
+        })
+    except Exception as e:
+        logger.error(f"Error syncing positions: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/sync/orders', methods=['POST'])
+@require_authentication
+def sync_orders():
+    """Sync orders from Zerodha and create trade records"""
+    try:
+        # Get broker_id from session
+        broker_id = SaaSSessionManager.get_broker_id()
+        if not broker_id:
+            return jsonify({
+                'success': False,
+                'error': 'Not authenticated'
+            }), 401
+        
+        # Get credentials from session and ensure kite_client_global is initialized
+        creds = SaaSSessionManager.get_credentials()
+        if not creds.get('access_token') or not creds.get('api_key'):
+            return jsonify({
+                'success': False,
+                'error': 'Missing credentials. Please authenticate first.'
+            }), 401
+        
+        # Ensure kite_client_global is initialized from session credentials
+        global kite_client_global, kite_api_key, kite_api_secret
+        if not kite_client_global or not hasattr(kite_client_global, 'kite') or kite_client_global.access_token != creds.get('access_token'):
+            # Reinitialize kite client from session credentials
+            kite_api_key = creds.get('api_key', '')
+            kite_api_secret = creds.get('api_secret', '')
+            access_token = creds.get('access_token')
+            
+            if kite_api_key and access_token:
+                try:
+                    from src.kite_client import KiteClient
+                except ImportError:
+                    from kite_client import KiteClient
+                
+                kite_client_global = KiteClient(
+                    kite_api_key,
+                    kite_api_secret or '',
+                    access_token=access_token,
+                    account=creds.get('full_name', 'DASHBOARD')
+                )
+                logger.info("Kite client reinitialized from session credentials for sync")
+        
+        kite_client = kite_client_global
+        
+        if not kite_client or not hasattr(kite_client, 'kite') or not kite_client.kite:
+            return jsonify({
+                'success': False,
+                'error': 'Kite client not available. Please authenticate first.'
+            }), 400
+        
+        # Get target date from request (optional, defaults to today)
+        target_date_str = request.json.get('date') if request.json else None
+        target_date = None
+        if target_date_str:
+            try:
+                from datetime import date as date_type
+                target_date = datetime.strptime(target_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify({
+                    'success': False,
+                    'error': 'Invalid date format. Use YYYY-MM-DD'
+                }), 400
+        
+        from src.database.models import DatabaseManager
+        from src.database.repository import PositionRepository, TradeRepository
+        from src.api.order_sync import OrderSync
+        
+        db_manager = DatabaseManager()
+        position_repo = PositionRepository(db_manager)
+        trade_repo = TradeRepository(db_manager)
+        
+        # IMPORTANT: Sync positions FIRST to detect manually closed positions
+        # This ensures positions that were closed in Kite are marked as inactive
+        positions_closed = 0
+        try:
+            from src.api.position_sync import PositionSync
+            position_sync = PositionSync(kite_client, position_repo, trade_repo)
+            logger.info("Syncing positions to detect closed positions...")
+            synced_positions = position_sync.sync_positions_from_api(broker_id)
+            
+            # Count how many positions were marked as inactive (using cached service)
+            from src.database.shared_data_service import SharedDataService
+            shared_data = SharedDataService(db_manager)
+            active_before = len(shared_data.get_active_positions_cached(broker_id, ttl_seconds=0.1))
+            
+            # Re-check after sync (cache will be invalidated by sync)
+            active_after = len(shared_data.get_active_positions_cached(broker_id, ttl_seconds=0.1))
+            positions_closed = active_before - active_after
+            
+            logger.info(
+                f"Position sync completed: {len(synced_positions)} positions synced, "
+                f"{positions_closed} positions closed"
+            )
+        except Exception as sync_error:
+            logger.warning(f"Position sync error (non-critical): {sync_error}")
+        
+        # Now sync orders to create trade records
+        order_sync = OrderSync(kite_client, trade_repo, position_repo)
+        
+        logger.info(f"Starting order sync for date: {target_date}")
+        created_trades = order_sync.sync_orders_to_trades(broker_id, target_date)
+        logger.info(f"Order sync returned {len(created_trades)} trades")
+        
+        # Invalidate trade cache after sync (trades changed)
+        shared_data = SharedDataService(db_manager)
+        if target_date:
+            shared_data.invalidate_trade_cache(broker_id, trade_date=target_date)
+        else:
+            from datetime import date as date_type
+            shared_data.invalidate_trade_cache(broker_id, trade_date=date_type.today())
+        
+        message = f"Synced orders and created {len(created_trades)} trade records"
+        if positions_closed > 0:
+            message += f", {positions_closed} positions marked as closed"
+        
+        return jsonify({
+            'success': True,
+            'message': message,
+            'trades_created': len(created_trades),
+            'positions_closed': positions_closed,
+            'trades': created_trades
+        })
+    except Exception as e:
+        logger.error(f"Error syncing orders: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/api/dashboard/trade-history')
 @require_authentication
 def get_trade_history():
-    """Get trade history from s001_trades database table"""
+    """Get trade history for today - includes both closed trades and open positions"""
     try:
-        date_filter = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
-        show_all = request.args.get('all', 'false').lower() == 'true'
+        from datetime import date as date_type
+        today = date_type.today()
         
         trades = []
         summary = {
@@ -1469,59 +1840,82 @@ def get_trade_history():
             'winRate': 0.0
         }
         
-        # Try to use database first
+        # Get broker_id from session (SaaS-compliant)
+        broker_id = SaaSSessionManager.get_broker_id()
+        if not broker_id:
+            # Fallback to default if not authenticated
+            broker_id = 'default'
+        
+        # Try to use database first (using cached service for performance)
         try:
             from src.database.models import DatabaseManager
-            from src.database.repository import TradeRepository
-            from datetime import date as date_type
+            from src.database.shared_data_service import SharedDataService
+            from src.database.repository import PositionRepository
             
             db_manager = DatabaseManager()
-            trade_repo = TradeRepository(db_manager)
-            session = db_manager.get_session()
+            shared_data = SharedDataService(db_manager)
             
-            try:
-                # Get broker_id from session (SaaS-compliant)
-                broker_id = SaaSSessionManager.get_broker_id()
-                if not broker_id:
-                    # Fallback to default if not authenticated
-                    broker_id = 'default'
+            # Get closed trades for today (using cached service - 10 second TTL)
+            db_trades = shared_data.get_trades_by_date_cached(broker_id, today, ttl_seconds=10.0)
+            
+            # Process closed trades
+            for trade in db_trades:
+                trades.append({
+                    'symbol': trade.trading_symbol,
+                    'entry_time': trade.entry_time.isoformat() if trade.entry_time else '',
+                    'exit_time': trade.exit_time.isoformat() if trade.exit_time else '',
+                    'entry_price': trade.entry_price,
+                    'exit_price': trade.exit_price,
+                    'quantity': trade.quantity,
+                    'pnl': trade.realized_pnl,
+                    'trade_type': trade.transaction_type,
+                    'status': 'closed'  # Closed trade
+                })
                 
-                # Parse date filter
-                trade_date = datetime.strptime(date_filter, '%Y-%m-%d').date() if date_filter else date_type.today()
-                
-                # Get trades from database
-                if show_all:
-                    db_trades = trade_repo.get_all_trades(session, broker_id)
+                # Update summary
+                summary['totalTrades'] += 1
+                if trade.realized_pnl >= 0:
+                    summary['totalProfit'] += trade.realized_pnl
                 else:
-                    db_trades = trade_repo.get_trades_by_date(session, broker_id, trade_date, show_all)
-                
-                for trade in db_trades:
+                    summary['totalLoss'] += abs(trade.realized_pnl)
+                summary['netPnl'] += trade.realized_pnl
+            
+            # Get open positions for today (active positions entered today)
+            active_positions = shared_data.get_active_positions_cached(broker_id, ttl_seconds=2.0)
+            
+            # Filter positions that were entered today
+            for pos in active_positions:
+                # Check if position was entered today
+                entry_date = pos.entry_time.date() if pos.entry_time else None
+                if entry_date == today:
+                    # Calculate unrealized P&L for open positions
+                    unrealized_pnl = pos.unrealized_pnl or 0.0
+                    
                     trades.append({
-                        'symbol': trade.trading_symbol,
-                        'entry_time': trade.entry_time.isoformat() if trade.entry_time else '',
-                        'exit_time': trade.exit_time.isoformat() if trade.exit_time else '',
-                        'entry_price': trade.entry_price,
-                        'exit_price': trade.exit_price,
-                        'quantity': trade.quantity,
-                        'pnl': trade.realized_pnl,
-                        'trade_type': trade.transaction_type
+                        'symbol': pos.trading_symbol,
+                        'entry_time': pos.entry_time.isoformat() if pos.entry_time else '',
+                        'exit_time': '',  # No exit time for open positions
+                        'entry_price': pos.entry_price,
+                        'exit_price': pos.current_price or pos.entry_price,  # Current price as exit price
+                        'quantity': pos.quantity,
+                        'pnl': unrealized_pnl,
+                        'trade_type': 'BUY' if pos.quantity > 0 else 'SELL',
+                        'status': 'open'  # Open position
                     })
                     
-                    # Update summary
+                    # Update summary (include unrealized P&L)
                     summary['totalTrades'] += 1
-                    if trade.realized_pnl >= 0:
-                        summary['totalProfit'] += trade.realized_pnl
+                    if unrealized_pnl >= 0:
+                        summary['totalProfit'] += unrealized_pnl
                     else:
-                        summary['totalLoss'] += abs(trade.realized_pnl)
-                    summary['netPnl'] += trade.realized_pnl
-                
-                # Calculate win rate
-                if summary['totalTrades'] > 0:
-                    winning_trades = sum(1 for t in trades if t['pnl'] >= 0)
-                    summary['winRate'] = (winning_trades / summary['totalTrades']) * 100
-                
-            finally:
-                session.close()
+                        summary['totalLoss'] += abs(unrealized_pnl)
+                    summary['netPnl'] += unrealized_pnl
+            
+            # Calculate win rate (only for closed trades)
+            closed_trades = [t for t in trades if t.get('status') == 'closed']
+            if len(closed_trades) > 0:
+                winning_trades = sum(1 for t in closed_trades if t['pnl'] >= 0)
+                summary['winRate'] = (winning_trades / len(closed_trades)) * 100
         except Exception as db_error:
             # Fallback to JSON file if database not available
             logger.warning(f"Database not available, using JSON fallback: {db_error}")
@@ -1531,10 +1925,11 @@ def get_trade_history():
                     with open(pnl_data_path, 'r') as f:
                         pnl_data = json.load(f)
                         
-                    # Filter by date if needed
+                    # Filter for today's trades only
+                    today_str = today.strftime('%Y-%m-%d')
                     for trade in pnl_data.get('trades', []):
                         trade_date = trade.get('date', '')
-                        if show_all or trade_date == date_filter:
+                        if trade_date == today_str:
                             trades.append({
                                 'symbol': trade.get('symbol', 'N/A'),
                                 'entry_time': trade.get('entry_time', ''),
@@ -1543,7 +1938,8 @@ def get_trade_history():
                                 'exit_price': trade.get('exit_price', 0),
                                 'quantity': trade.get('quantity', 0),
                                 'pnl': trade.get('pnl', 0),
-                                'trade_type': trade.get('type', 'SELL')
+                                'trade_type': trade.get('type', 'SELL'),
+                                'status': 'closed'
                             })
                             
                             # Update summary
@@ -1556,7 +1952,7 @@ def get_trade_history():
                     
                     # Calculate win rate
                     if summary['totalTrades'] > 0:
-                        winning_trades = sum(1 for t in trades if t['pnl'] >= 0)
+                        winning_trades = sum(1 for t in trades if t.get('pnl', 0) >= 0)
                         summary['winRate'] = (winning_trades / summary['totalTrades']) * 100
             except Exception as e:
                 logger.error(f"Error loading trade history from JSON: {e}")
@@ -1600,11 +1996,19 @@ def get_cumulative_pnl():
             start_of_day = today
             
             # Calculate cumulative P&L for different periods
+            # Note: These are aggregate queries - could be optimized further with single query
             all_time_pnl = trade_repo.get_cumulative_pnl(session, broker_id, date(2020, 1, 1), today)
             year_pnl = trade_repo.get_cumulative_pnl(session, broker_id, start_of_year, today)
             month_pnl = trade_repo.get_cumulative_pnl(session, broker_id, start_of_month, today)
             week_pnl = trade_repo.get_cumulative_pnl(session, broker_id, start_of_week, today)
-            day_pnl = trade_repo.get_cumulative_pnl(session, broker_id, start_of_day, today)
+            # Day P&L can use cached protected profit
+            from src.database.shared_data_service import SharedDataService
+            shared_data = SharedDataService(db_manager)
+            day_pnl = shared_data.get_protected_profit_cached(broker_id, start_of_day, ttl_seconds=5.0)
+            
+            # Get month name for display
+            month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+            current_month_name = month_names[today.month - 1]
             
             return jsonify({
                 'status': 'success',
@@ -1612,7 +2016,9 @@ def get_cumulative_pnl():
                 'year': year_pnl,
                 'month': month_pnl,
                 'week': week_pnl,
-                'day': day_pnl
+                'day': day_pnl,
+                'current_year': today.year,
+                'current_month': current_month_name
             })
         finally:
             session.close()
@@ -1629,6 +2035,7 @@ def get_cumulative_pnl():
         })
 
 @app.route('/api/database/init', methods=['POST'])
+@require_authentication
 def init_database():
     """Initialize database tables (s001_*)"""
     try:
@@ -1732,6 +2139,7 @@ def get_pnl_chart_data():
         }), 500
 
 @app.route('/api/strategy/start', methods=['POST'])
+@require_authentication
 def start_strategy():
     """Start the trading strategy"""
     try:
@@ -2505,6 +2913,7 @@ def stop_live_trader():
         }), 500
 
 @app.route('/api/strategy/stop', methods=['POST'])
+@require_authentication
 def stop_strategy():
     """Stop the trading strategy (legacy endpoint - redirects to per-session stop)"""
     try:
@@ -2856,10 +3265,13 @@ def authenticate():
                             handler.close()
                     
                     # Setup new blob handler with correct account name
+                    # Get broker_id for log organization
+                    broker_id = SaaSSessionManager.get_broker_id()
                     blob_handler, blob_path = setup_azure_blob_logging(
                         account_name=account_holder_name,
                         logger_name=__name__,
-                        streaming_mode=True
+                        streaming_mode=True,  # Real-time streaming for log retention
+                        broker_id=broker_id  # Use broker_id for multi-tenant log isolation
                     )
                     if blob_handler:
                         logger.info(f"[AUTH] Azure Blob Storage logging updated: {blob_path}")
@@ -3116,10 +3528,13 @@ def set_access_token():
                             handler.close()
                     
                     # Setup new blob handler with correct account name
+                    # Get broker_id for log organization
+                    broker_id = SaaSSessionManager.get_broker_id()
                     blob_handler, blob_path = setup_azure_blob_logging(
                         account_name=account_holder_name,
                         logger_name=__name__,
-                        streaming_mode=True
+                        streaming_mode=True,  # Real-time streaming for log retention
+                        broker_id=broker_id  # Use broker_id for multi-tenant log isolation
                     )
                     if blob_handler:
                         logger.info(f"[AUTH] Azure Blob Storage logging updated: {blob_path}")

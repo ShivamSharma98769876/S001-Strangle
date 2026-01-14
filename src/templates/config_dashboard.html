@@ -1236,12 +1236,12 @@
                             <div class="metric-percentage" id="percentage-all-time"></div>
                         </div>
                         <div class="pnl-metric-item" id="metric-year">
-                            <div class="metric-label" id="label-year">Year (2025)</div>
+                            <div class="metric-label" id="label-year">Year</div>
                             <div class="metric-value" id="value-year">₹0.00</div>
                             <div class="metric-percentage" id="percentage-year">(100.00%)</div>
                         </div>
                         <div class="pnl-metric-item" id="metric-month">
-                            <div class="metric-label" id="label-month">Month (Dec)</div>
+                            <div class="metric-label" id="label-month">Month</div>
                             <div class="metric-value" id="value-month">₹0.00</div>
                             <div class="metric-percentage" id="percentage-month"></div>
                         </div>
@@ -1277,11 +1277,6 @@
                                 style="padding: 6px 12px; background: #10b981; color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">
                             🔄 Sync Orders from Zerodha
                         </button>
-                        <label style="display: flex; align-items: center; gap: 5px; font-size: 12px;">
-                            <input type="checkbox" id="showAllTrades" onchange="toggleTradeFilter()">
-                            Show All Trades
-                        </label>
-                        <input type="date" id="tradeDateFilter" class="date-filter">
                     </div>
                 </div>
                 <!-- Trade Summary -->
@@ -1313,9 +1308,9 @@
                             <tr>
                                 <th>Symbol</th>
                                 <th>Entry Time (IST)</th>
-                                <th>Exit Time (IST)</th>
+                                <th>Exit Time / Status</th>
                                 <th>Entry Price</th>
-                                <th>Exit Price</th>
+                                <th>Exit Price / Current</th>
                                 <th>Quantity</th>
                                 <th>P&L</th>
                                 <th>
@@ -1923,7 +1918,6 @@
             
             initializeTheme();
             initializeDashboard();
-            setupDateFilter();
             initializeChart();
             startAutoRefresh();
             
@@ -2044,10 +2038,7 @@
             loadAllPositions();
         }
         
-        function setupDateFilter() {
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('tradeDateFilter').value = today;
-        }
+        // setupDateFilter removed - trade history always shows today's trades
         
         function initializeChart() {
             // Check for P&L chart canvas
