@@ -114,16 +114,20 @@ function preserveJwtTokenInLinks() {
         // Skip anchor links
         if (href.startsWith('#')) return;
         
-        // Add JWT token to link
-        const separator = href.includes('?') ? '&' : '?';
-        link.setAttribute('href', `${href}${separator}sso_token=${encodeURIComponent(ssoToken)}`);
+        // Add JWT token to link (respect proxy base path)
+        const normalizedHref = typeof window.withBasePath === 'function' ? window.withBasePath(href) : href;
+        const separator = normalizedHref.includes('?') ? '&' : '?';
+        link.setAttribute('href', `${normalizedHref}${separator}sso_token=${encodeURIComponent(ssoToken)}`);
     });
     
     // Also intercept programmatic navigation (pushState)
     const originalPushState = history.pushState;
     history.pushState = function(...args) {
-        const url = args[2];
+        let url = args[2];
         if (url && !url.includes('sso_token=') && url.startsWith('/')) {
+            if (typeof window.withBasePath === 'function') {
+                url = window.withBasePath(url);
+            }
             const separator = url.includes('?') ? '&' : '?';
             args[2] = `${url}${separator}sso_token=${encodeURIComponent(ssoToken)}`;
         }
