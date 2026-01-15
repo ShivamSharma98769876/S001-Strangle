@@ -13,3 +13,8 @@ KITE_ACCOUNT=your_account_here
 #   - AZURE_BLOB_ACCOUNT_NAME: Storage account name (e.g., s0001strangle)
 #   - AZURE_BLOB_CONTAINER_NAME: Container name for logs (e.g., s0001strangle)
 #   - AZURE_BLOB_LOGGING_ENABLED: Enable/disable Azure Blob logging (True/False)
+
+# Main Application URL Configuration
+# Set this in Azure Portal > Configuration > Application settings
+# If not set, defaults to https://StockSage.trade
+MAIN_APP_URL=https://StockSage.trade

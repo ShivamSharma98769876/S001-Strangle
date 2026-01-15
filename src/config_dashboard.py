@@ -535,6 +535,26 @@ def require_jwt_token_in_cloud() -> Tuple[bool, Optional[str], Optional[dict]]:
 
 # ===== END JWT TOKEN VALIDATION FUNCTIONS =====
 
+# Routes that should be accessible with JWT only (no SaaS session yet)
+JWT_ONLY_PAGE_ROUTES = {'/', '/credentials'}
+# Static assets should never require SaaS session
+JWT_ONLY_PREFIXES = ('/static/',)
+# Known reverse-proxy prefixes (e.g., app mounted at /s001)
+JWT_ONLY_BASE_PREFIXES = ('/s001',)
+
+def is_jwt_only_path(path: str) -> bool:
+    """Return True if path should allow JWT-only access."""
+    if not path:
+        return False
+    if path in JWT_ONLY_PAGE_ROUTES or path.startswith(JWT_ONLY_PREFIXES):
+        return True
+    for base in JWT_ONLY_BASE_PREFIXES:
+        if path == base or path.startswith(base + '/'):
+            subpath = path[len(base):] or '/'
+            if subpath in JWT_ONLY_PAGE_ROUTES or subpath.startswith(JWT_ONLY_PREFIXES):
+                return True
+    return False
+
 # Authentication decorator for routes that require JWT token
 def require_authentication(f):
     """Decorator to require authentication for API routes - STRICT on cloud environments"""
@@ -596,6 +616,8 @@ def require_authentication_page(f):
                 return render_template('auth_required.html', 
                                      message=jwt_error or f'JWT token required. Please navigate through {main_app_url if main_app_url else "the main application"}',
                                      main_app_url=main_app_url), 401
+            if is_jwt_only_path(request.path):
+                return f(*args, **kwargs)
         
         # STRICT authentication check for all environments (local and cloud)
         if not SaaSSessionManager.is_authenticated():
@@ -681,6 +703,10 @@ def check_session_expiration():
                 return render_template('auth_required.html', 
                                      message=error_msg,
                                      main_app_url=main_app_url), 401
+        if is_jwt_only_path(request.path):
+            if SaaSSessionManager.is_authenticated():
+                SaaSSessionManager.extend_session()
+            return None
         
         # Then check SaaS session authentication (except for auth endpoints which handle their own auth)
         if not request.path.startswith('/api/auth/'):
