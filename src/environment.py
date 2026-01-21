@@ -990,17 +990,17 @@ def get_log_directory(account_name=None):
     """
     Get the appropriate log directory based on environment
     - Local: src/logs directory
-    - Azure: /tmp/{account_name}/logs/ (account-specific directory in /tmp)
+    - Azure: /home/LogFiles/AppLogs/{account_name}/ (account-specific directory)
     """
     if is_azure_environment():
-        # Azure: Use /tmp/{account_name}/logs/ structure
+        # Azure: Use /home/LogFiles/AppLogs/{account_name}/ structure
         if account_name:
             # Sanitize account name for directory name
             sanitized_account = sanitize_account_name_for_filename(account_name)
-            log_dir = os.path.join('/tmp', sanitized_account, 'logs')
+            log_dir = os.path.join(os.sep, 'home', 'LogFiles', 'AppLogs', sanitized_account)
         else:
-            # Fallback to /tmp/logs if no account name
-            log_dir = '/tmp/logs'
+            # Fallback to /home/LogFiles/AppLogs if no account name
+            log_dir = os.path.join(os.sep, 'home', 'LogFiles', 'AppLogs')
     else:
         # Local: use src/logs directory
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1016,7 +1016,7 @@ def setup_azure_logging(logger_name='root', account_name=None):
     Azure automatically captures stdout/stderr, so we configure both file and console logging
     
     Logging Strategy:
-    - File logs: /tmp/{account_name}/logs/ (ephemeral, cleared on deployment)
+    - File logs: /home/LogFiles/AppLogs/{account_name}/ (persistent on App Service)
     - Azure Blob Storage: Persistent backup (survives deployments)
     
     This ensures:

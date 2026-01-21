@@ -7,6 +7,7 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, s
 import json
 import os
 import sys
+import re
 import subprocess
 from datetime import datetime, timedelta, timezone
 import threading
@@ -116,6 +117,14 @@ def health_check_early():
     # This is critical for Azure startup probe to succeed
     return {'status': 'healthy', 'service': 'trading-bot-dashboard'}, 200
 
+def is_health_path(path: str) -> bool:
+    """Return True for health endpoints, including prefixed paths."""
+    if not path:
+        return False
+    if path in ['/health', '/healthz']:
+        return True
+    return bool(re.match(r'^/s\d{3}/healthz?$', path))
+
 # Note: Root route '/' will be defined later for the dashboard
 # Health endpoints above are registered first to ensure they work immediately
 
@@ -125,7 +134,7 @@ def handle_unhandled_exception(e):
     """Catch all unhandled exceptions to prevent worker crashes"""
     # Don't handle errors for health endpoint - let it fail fast if needed
     from flask import request
-    if request.path in ['/health', '/healthz']:
+    if is_health_path(request.path):
         raise  # Re-raise for health endpoints
     
     import traceback
@@ -205,7 +214,18 @@ else:
 
 # Setup file logging (logger already initialized above)
 # Add file handler to existing logger with IST timezone
-file_handler = logging.FileHandler('dashboard.log', encoding='utf-8')
+def get_app_log_path() -> str:
+    """Return log file path for local or Azure App Service."""
+    if os.getenv('WEBSITE_SITE_NAME') or os.getenv('WEBSITE_INSTANCE_ID') or os.getenv('HTTP_PLATFORM_PORT'):
+        base_dir = os.path.join(os.sep, 'home', 'LogFiles', 'AppLogs')
+        try:
+            os.makedirs(base_dir, exist_ok=True)
+        except Exception as e:
+            logger.warning(f"[LOG] Could not create log directory {base_dir}: {e}")
+        return os.path.join(base_dir, 'dashboard.log')
+    return os.path.join(current_dir, 'dashboard.log')
+
+file_handler = logging.FileHandler(get_app_log_path(), encoding='utf-8')
 file_handler.setFormatter(ISTFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 logger.addHandler(file_handler)
 
@@ -674,10 +694,12 @@ def admin_panel():
 def check_session_expiration():
     """Check and extend session on each request, enforce JWT authentication on cloud for ALL routes"""
     # List of public routes that should NEVER require authentication (health checks only)
-    public_routes = ['/health', '/healthz', '/favicon.ico']
+    public_routes = ['/health', '/healthz', '/favicon.ico', '/static']
     
     # Skip authentication check for public routes (health checks)
     is_public = any(request.path == route or request.path.startswith(route + '/') for route in public_routes)
+    if not is_public and is_health_path(request.path):
+        is_public = True
     if is_public:
         # Still extend session if authenticated, but don't block
         if SaaSSessionManager.is_authenticated():
@@ -847,6 +869,74 @@ kite_api_key = None
 kite_api_secret = None
 account_holder_name = None  # Store account holder name from profile
 strategy_account_name = None  # Store account name used when starting strategy (for log retrieval)
+
+# Per-session Kite client cache (avoid global client thrash across users)
+_kite_clients = {}  # Dict[str, KiteClient]
+_kite_clients_lock = threading.Lock()
+_kite_status_cache = {}  # Dict[str, Tuple[float, dict]]
+_kite_status_lock = threading.Lock()
+KITE_STATUS_TTL_SECONDS = int(os.getenv('KITE_STATUS_TTL_SECONDS', '10'))
+
+def _kite_client_key(broker_id: str, device_id: str) -> str:
+    return f"{broker_id}_{device_id}"
+
+def get_session_kite_client(creds: dict):
+    """Return a per-session KiteClient (cached) without touching global client."""
+    if not creds:
+        return None
+    access_token = creds.get('access_token')
+    api_key = creds.get('api_key')
+    api_secret = creds.get('api_secret', '') or ''
+    if not access_token or not api_key:
+        return None
+    broker_id = creds.get('broker_id') or api_key
+    device_id = creds.get('device_id') or SaaSSessionManager.get_device_id()
+    if not device_id:
+        return None
+    key = _kite_client_key(broker_id, device_id)
+    with _kite_clients_lock:
+        client = _kite_clients.get(key)
+        if client and getattr(client, 'access_token', None) == access_token:
+            return client
+        try:
+            try:
+                from src.kite_client import KiteClient
+            except ImportError:
+                from kite_client import KiteClient
+            client = KiteClient(
+                api_key,
+                api_secret,
+                access_token=access_token,
+                account=creds.get('full_name', 'DASHBOARD')
+            )
+            _kite_clients[key] = client
+            return client
+        except Exception as e:
+            logger.warning(f"[KITE] Could not initialize session client: {e}")
+            return None
+
+def clear_session_kite_client():
+    """Remove per-session KiteClient from cache."""
+    broker_id = SaaSSessionManager.get_broker_id()
+    device_id = SaaSSessionManager.get_device_id()
+    if not broker_id or not device_id:
+        return
+    key = _kite_client_key(broker_id, device_id)
+    with _kite_clients_lock:
+        _kite_clients.pop(key, None)
+
+def store_session_api_credentials(api_key: str, api_secret: str):
+    """Store API key/secret in session without marking authenticated."""
+    if not api_key or not api_secret:
+        return
+    session.permanent = True
+    session[SaaSSessionManager.SESSION_API_KEY] = api_key
+    session[SaaSSessionManager.SESSION_API_SECRET] = api_secret
+    if not session.get(SaaSSessionManager.SESSION_DEVICE_ID):
+        session[SaaSSessionManager.SESSION_DEVICE_ID] = SaaSSessionManager.generate_device_id()
+    if not session.get(SaaSSessionManager.SESSION_EXPIRES_AT):
+        expires_at = (datetime.now() + timedelta(hours=24)).isoformat()
+        session[SaaSSessionManager.SESSION_EXPIRES_AT] = expires_at
 
 # Token persistence file path
 TOKEN_STORAGE_FILE = os.path.join(current_dir, 'kite_tokens.json')
@@ -1029,9 +1119,14 @@ def dashboard():
     except:
         pass
     
-    # Get account holder name if authenticated
-    global account_holder_name
-    account_name_display = account_holder_name if account_holder_name else None
+    # Get account holder name if authenticated (per-session)
+    account_name_display = None
+    try:
+        creds = SaaSSessionManager.get_credentials()
+        if creds.get('authenticated'):
+            account_name_display = creds.get('full_name') or creds.get('account_name')
+    except Exception:
+        account_name_display = None
     
     # Pass account name to template
     return render_template('config_dashboard.html', 
@@ -1461,7 +1556,7 @@ def get_trading_status():
 def get_dashboard_metrics():
     """Get Total Day P&L for trades with tag='S001'"""
     try:
-        global strategy_bot, kite_client_global
+        global strategy_bot
         
         total_day_pnl = 0.0
         
@@ -1469,8 +1564,9 @@ def get_dashboard_metrics():
         kite_client = None
         if strategy_bot and hasattr(strategy_bot, 'kite_client'):
             kite_client = strategy_bot.kite_client
-        elif kite_client_global:
-            kite_client = kite_client_global
+        else:
+            creds = SaaSSessionManager.get_credentials()
+            kite_client = get_session_kite_client(creds)
         
         if kite_client and hasattr(kite_client, 'kite'):
             try:
@@ -1529,8 +1625,6 @@ def get_dashboard_metrics():
 @require_authentication
 def get_dashboard_positions():
     """Get all positions (active and inactive) from database with optional sync from API"""
-    global kite_client_global  # Declare global at function start
-    
     try:
         # Get broker_id from session
         broker_id = SaaSSessionManager.get_broker_id()
@@ -1549,7 +1643,8 @@ def get_dashboard_positions():
         # Try to sync positions from API if requested
         if sync:
             try:
-                kite_client = kite_client_global
+                creds = SaaSSessionManager.get_credentials()
+                kite_client = get_session_kite_client(creds)
                 
                 if kite_client and hasattr(kite_client, 'kite'):
                     from src.database.models import DatabaseManager
@@ -1601,7 +1696,8 @@ def get_dashboard_positions():
         except Exception as db_error:
             logger.warning(f"Error fetching positions from database: {db_error}")
             # Fallback to API if database fails
-            kite_client = kite_client_global
+            creds = SaaSSessionManager.get_credentials()
+            kite_client = get_session_kite_client(creds)
             
             if kite_client and hasattr(kite_client, 'kite'):
                 try:
@@ -1661,29 +1757,7 @@ def sync_positions():
                 'error': 'Missing credentials. Please authenticate first.'
             }), 401
         
-        # Ensure kite_client_global is initialized from session credentials
-        global kite_client_global, kite_api_key, kite_api_secret
-        if not kite_client_global or not hasattr(kite_client_global, 'kite') or kite_client_global.access_token != creds.get('access_token'):
-            # Reinitialize kite client from session credentials
-            kite_api_key = creds.get('api_key', '')
-            kite_api_secret = creds.get('api_secret', '')
-            access_token = creds.get('access_token')
-            
-            if kite_api_key and access_token:
-                try:
-                    from src.kite_client import KiteClient
-                except ImportError:
-                    from kite_client import KiteClient
-                
-                kite_client_global = KiteClient(
-                    kite_api_key,
-                    kite_api_secret or '',
-                    access_token=access_token,
-                    account=creds.get('full_name', 'DASHBOARD')
-                )
-                logger.info("Kite client reinitialized from session credentials for position sync")
-        
-        kite_client = kite_client_global
+        kite_client = get_session_kite_client(creds)
         
         if not kite_client or not hasattr(kite_client, 'kite') or not kite_client.kite:
             return jsonify({
@@ -1740,29 +1814,7 @@ def sync_orders():
                 'error': 'Missing credentials. Please authenticate first.'
             }), 401
         
-        # Ensure kite_client_global is initialized from session credentials
-        global kite_client_global, kite_api_key, kite_api_secret
-        if not kite_client_global or not hasattr(kite_client_global, 'kite') or kite_client_global.access_token != creds.get('access_token'):
-            # Reinitialize kite client from session credentials
-            kite_api_key = creds.get('api_key', '')
-            kite_api_secret = creds.get('api_secret', '')
-            access_token = creds.get('access_token')
-            
-            if kite_api_key and access_token:
-                try:
-                    from src.kite_client import KiteClient
-                except ImportError:
-                    from kite_client import KiteClient
-                
-                kite_client_global = KiteClient(
-                    kite_api_key,
-                    kite_api_secret or '',
-                    access_token=access_token,
-                    account=creds.get('full_name', 'DASHBOARD')
-                )
-                logger.info("Kite client reinitialized from session credentials for sync")
-        
-        kite_client = kite_client_global
+        kite_client = get_session_kite_client(creds)
         
         if not kite_client or not hasattr(kite_client, 'kite') or not kite_client.kite:
             return jsonify({
@@ -2265,28 +2317,8 @@ def live_trader_page():
         broker_id = creds.get('broker_id') or creds.get('api_key', '')  # broker_id is Zerodha client ID
         user_email = creds.get('email') or ''  # Email from JWT
         
-        # Sync global variables from session (lazy - only if needed)
-        global account_holder_name, kite_api_key, kite_api_secret, kite_client_global
-        account_holder_name = account_name_display
-        
-        # Lazy initialization of KiteClient - only if not already set and credentials exist
-        # This avoids unnecessary initialization on every page load
-        if creds.get('access_token') and creds.get('api_key') and creds.get('api_secret'):
-            kite_api_key = creds.get('api_key', '')
-            kite_api_secret = creds.get('api_secret', '')
-            
-            # Only create KiteClient if not already initialized (avoid re-initialization)
-            if not kite_client_global or not hasattr(kite_client_global, 'access_token') or kite_client_global.access_token != creds.get('access_token'):
-                try:
-                    from src.kite_client import KiteClient
-                except ImportError:
-                    from kite_client import KiteClient
-                kite_client_global = KiteClient(
-                    kite_api_key,
-                    kite_api_secret,
-                    access_token=creds.get('access_token'),
-                    account=account_name_display
-                )
+        # Initialize per-session KiteClient (cached) to avoid global reuse
+        get_session_kite_client(creds)
         
         # Render template with account holder name, broker_id (Zerodha ID), and email from JWT
         return render_template('live_trader.html', 
@@ -3106,6 +3138,7 @@ def logout():
     """Logout and clear session credentials"""
     try:
         SaaSSessionManager.clear_credentials()
+        clear_session_kite_client()
         return jsonify({
             'success': True,
             'message': 'Logged out successfully'
@@ -3124,35 +3157,22 @@ def disconnect_zerodha():
         # Get user info before clearing
         user_id = SaaSSessionManager.get_user_id()
         broker_id = SaaSSessionManager.get_broker_id()
+        creds = SaaSSessionManager.get_credentials()
+        api_key = creds.get('api_key')
         
         # Clear server-side session (SaaS-compliant)
         SaaSSessionManager.clear_credentials()
+        clear_session_kite_client()
         
-        # Clear global kite client
-        global kite_client_global, kite_api_key, kite_api_secret, account_holder_name, strategy_account_name
-        if kite_client_global:
-            try:
-                # Close any connections if needed
-                if hasattr(kite_client_global, 'kite'):
-                    kite_client_global.kite = None
-            except:
-                pass
-        kite_client_global = None
-        kite_api_key = None
-        kite_api_secret = None
-        account_holder_name = None
-        strategy_account_name = None
-        
-        # Clear stored tokens file
+        # Clear stored token for this API key only
         try:
             if os.path.exists(TOKEN_STORAGE_FILE):
-                tokens = {}
                 with open(TOKEN_STORAGE_FILE, 'r') as f:
                     tokens = json.load(f)
-                # Clear all tokens
-                tokens.clear()
-                with open(TOKEN_STORAGE_FILE, 'w') as f:
-                    json.dump(tokens, f, indent=2)
+                if api_key and api_key in tokens:
+                    tokens.pop(api_key, None)
+                    with open(TOKEN_STORAGE_FILE, 'w') as f:
+                        json.dump(tokens, f, indent=2)
         except Exception as e:
             logger.warning(f"[DISCONNECT] Could not clear token file: {e}")
         
@@ -3173,17 +3193,17 @@ def disconnect_zerodha():
 def set_credentials():
     """Set API credentials for authentication"""
     try:
-        global kite_api_key, kite_api_secret
-        
         data = request.get_json()
-        kite_api_key = data.get('api_key', '').strip()
-        kite_api_secret = data.get('api_secret', '').strip()
+        api_key = data.get('api_key', '').strip()
+        api_secret = data.get('api_secret', '').strip()
         
-        if not kite_api_key or not kite_api_secret:
+        if not api_key or not api_secret:
             return jsonify({
                 'success': False,
                 'error': 'API key and secret are required'
             }), 400
+
+        store_session_api_credentials(api_key, api_secret)
         
         return jsonify({
             'success': True,
@@ -3199,8 +3219,6 @@ def set_credentials():
 def authenticate():
     """Authenticate with Zerodha using request token"""
     try:
-        global strategy_bot, kite_client_global, kite_api_key, kite_api_secret
-        
         data = request.get_json() or {}
         request_token = data.get('request_token', '').strip()
         incoming_api_key = data.get('api_key', '').strip()
@@ -3214,75 +3232,78 @@ def authenticate():
         
         # Allow API key/secret to be provided in the same call
         if incoming_api_key and incoming_api_secret:
-            kite_api_key = incoming_api_key
-            kite_api_secret = incoming_api_secret
+            api_key = incoming_api_key
+            api_secret = incoming_api_secret
         elif incoming_api_key or incoming_api_secret:
             return jsonify({
                 'success': False,
                 'error': 'Both API key and API secret are required'
             }), 400
+        else:
+            api_key = session.get(SaaSSessionManager.SESSION_API_KEY, '').strip()
+            api_secret = session.get(SaaSSessionManager.SESSION_API_SECRET, '').strip()
         
         # Need API key and secret for authentication
-        if not kite_api_key or not kite_api_secret:
+        if not api_key or not api_secret:
             return jsonify({
                 'success': False,
                 'error': 'API credentials not configured. Please provide API key and secret.'
             }), 400
         
-        # Create or update global kite client
+        # Create a session-scoped kite client
         try:
             try:
                 from src.kite_client import KiteClient  # when running from repo root
             except ImportError:
                 from kite_client import KiteClient       # fallback when src on PYTHONPATH
-            kite_client_global = KiteClient(
-                kite_api_key,
-                kite_api_secret,
+            kite_client = KiteClient(
+                api_key,
+                api_secret,
                 request_token=request_token,
                 account='DASHBOARD'
             )
             
             # Verify authentication by getting profile
-            is_valid, result = validate_kite_connection(kite_client_global)
+            is_valid, result = validate_kite_connection(kite_client)
             if not is_valid:
                 raise Exception(result)
             
             profile = result
             
             # Extract and store account holder name
-            global account_holder_name, strategy_account_name
-            account_holder_name = profile.get('user_name') or profile.get('user_id') or 'Trading Account'
-            kite_client_global.account = account_holder_name  # Update account name in client
-            # Keep strategy account name in sync for log matching
-            strategy_account_name = account_holder_name
+            account_name = profile.get('user_name') or profile.get('user_id') or 'Trading Account'
+            kite_client.account = account_name  # Update account name in client
             
             # Extract user_id and broker_id from profile
-            user_id = profile.get('user_id') or profile.get('user_name') or kite_api_key
-            broker_id = profile.get('user_id') or kite_api_key  # Use user_id as broker_id
+            user_id = profile.get('user_id') or profile.get('user_name') or api_key
+            broker_id = profile.get('user_id') or api_key  # Use user_id as broker_id
             
             # Store credentials in server-side session (SaaS-compliant)
             SaaSSessionManager.store_credentials(
-                api_key=kite_api_key,
-                api_secret=kite_api_secret,
-                access_token=kite_client_global.access_token,
+                api_key=api_key,
+                api_secret=api_secret,
+                access_token=kite_client.access_token,
                 request_token=request_token,
                 user_id=user_id,
                 broker_id=broker_id,
                 email=profile.get('email'),
-                full_name=account_holder_name
+                full_name=account_name
             )
             
             # Save token for persistence (backup)
-            if kite_client_global.access_token:
-                save_access_token(kite_api_key, kite_client_global.access_token, account_holder_name)
+            if kite_client.access_token:
+                save_access_token(api_key, kite_client.access_token, account_name)
+
+            store_session_api_credentials(api_key, api_secret)
+            get_session_kite_client(SaaSSessionManager.get_credentials())
             
-            logging.info(f"[AUTH] [broker_id: {broker_id}] Account holder name: {account_holder_name}")
+            logging.info(f"[AUTH] [broker_id: {broker_id}] Account holder name: {account_name}")
             
             # Re-setup Azure Blob logging with the correct account name for streaming logs
             try:
                 from src.environment import setup_azure_blob_logging, is_azure_environment
-                if is_azure_environment() and account_holder_name:
-                    print(f"[AUTH] Re-setting up Azure Blob Storage logging with account: {account_holder_name}")
+                if is_azure_environment() and account_name:
+                    print(f"[AUTH] Re-setting up Azure Blob Storage logging with account: {account_name}")
                     # Remove old blob handler if exists
                     logger = logging.getLogger(__name__)
                     for handler in logger.handlers[:]:
@@ -3294,21 +3315,21 @@ def authenticate():
                     # Get broker_id for log organization
                     broker_id = SaaSSessionManager.get_broker_id()
                     blob_handler, blob_path = setup_azure_blob_logging(
-                        account_name=account_holder_name,
+                        account_name=account_name,
                         logger_name=__name__,
                         streaming_mode=True,  # Real-time streaming for log retention
                         broker_id=broker_id  # Use broker_id for multi-tenant log isolation
                     )
                     if blob_handler:
                         logger.info(f"[AUTH] Azure Blob Storage logging updated: {blob_path}")
-                        print(f"[AUTH] ✓ Azure Blob Storage logging updated with account: {account_holder_name}")
+                        print(f"[AUTH] ✓ Azure Blob Storage logging updated with account: {account_name}")
             except Exception as e:
                 print(f"[AUTH] Warning: Could not update Azure Blob logging: {e}")
             
             return jsonify({
                 'success': True,
                 'message': 'Authentication successful',
-                'account_name': account_holder_name,
+                'account_name': account_name,
                 'broker_id': broker_id,
                 'device_id': SaaSSessionManager.get_device_id()
             })
@@ -3463,15 +3484,11 @@ def generate_access_token():
 def set_access_token():
     """Set access token directly (if user already has one)"""
     try:
-        global strategy_bot, kite_client_global, kite_api_key, kite_api_secret
-        
         data = request.get_json() or {}
         access_token = data.get('access_token', '').strip()
-        api_key = data.get('api_key', '').strip() or kite_api_key  # Allow overriding API key
+        api_key = data.get('api_key', '').strip() or session.get(SaaSSessionManager.SESSION_API_KEY, '').strip()
         api_secret_override = data.get('api_secret', '').strip()
-        
-        if api_secret_override:
-            kite_api_secret = api_secret_override  # persist secret if provided
+        api_secret_to_use = api_secret_override or session.get(SaaSSessionManager.SESSION_API_SECRET, '').strip() or ''
         
         if not access_token:
             return jsonify({
@@ -3485,15 +3502,13 @@ def set_access_token():
                 'error': 'API key is required. Please provide it in the form or configure it when starting the strategy.'
             }), 400
         
-        # Create or update global kite client with access token
+        # Create a session-scoped kite client with access token
         try:
             try:
                 from src.kite_client import KiteClient
             except ImportError:
                 from kite_client import KiteClient
-            # Use api_secret_override if provided, otherwise use stored kite_api_secret
-            api_secret_to_use = api_secret_override or kite_api_secret or ''
-            kite_client_global = KiteClient(
+            kite_client = KiteClient(
                 api_key,
                 api_secret_to_use,  # Store api_secret in KiteClient so it's available later
                 access_token=access_token,
@@ -3507,18 +3522,15 @@ def set_access_token():
                 logging.warning("[AUTH] API secret is empty - strategy may fail to start without it")
             
             # Verify the token works by getting profile
-            is_valid, result = validate_kite_connection(kite_client_global)
+            is_valid, result = validate_kite_connection(kite_client)
             if not is_valid:
                 raise Exception(result)
             
             profile = result
             
             # Extract and store account holder name
-            global account_holder_name, strategy_account_name
-            account_holder_name = profile.get('user_name') or profile.get('user_id') or 'Trading Account'
-            kite_client_global.account = account_holder_name  # Update account name in client
-            # Keep strategy account name in sync for log matching
-            strategy_account_name = account_holder_name
+            account_name = profile.get('user_name') or profile.get('user_id') or 'Trading Account'
+            kite_client.account = account_name  # Update account name in client
             
             # Extract user_id and broker_id from profile
             user_id = profile.get('user_id') or profile.get('user_name') or api_key
@@ -3532,20 +3544,23 @@ def set_access_token():
                 user_id=user_id,
                 broker_id=broker_id,
                 email=profile.get('email'),
-                full_name=account_holder_name
+                full_name=account_name
             )
             
             # Save token for persistence (backup)
-            if kite_client_global.access_token:
-                save_access_token(api_key, kite_client_global.access_token, account_holder_name)
+            if kite_client.access_token:
+                save_access_token(api_key, kite_client.access_token, account_name)
             
-            logging.info(f"[AUTH] [broker_id: {broker_id}] Account holder name: {account_holder_name}")
+            store_session_api_credentials(api_key, api_secret_to_use)
+            get_session_kite_client(SaaSSessionManager.get_credentials())
+            
+            logging.info(f"[AUTH] [broker_id: {broker_id}] Account holder name: {account_name}")
             
             # Re-setup Azure Blob logging with the correct account name for streaming logs
             try:
                 from src.environment import setup_azure_blob_logging, is_azure_environment
-                if is_azure_environment() and account_holder_name:
-                    print(f"[AUTH] Re-setting up Azure Blob Storage logging with account: {account_holder_name}")
+                if is_azure_environment() and account_name:
+                    print(f"[AUTH] Re-setting up Azure Blob Storage logging with account: {account_name}")
                     # Remove old blob handler if exists
                     logger = logging.getLogger(__name__)
                     for handler in logger.handlers[:]:
@@ -3557,26 +3572,22 @@ def set_access_token():
                     # Get broker_id for log organization
                     broker_id = SaaSSessionManager.get_broker_id()
                     blob_handler, blob_path = setup_azure_blob_logging(
-                        account_name=account_holder_name,
+                        account_name=account_name,
                         logger_name=__name__,
                         streaming_mode=True,  # Real-time streaming for log retention
                         broker_id=broker_id  # Use broker_id for multi-tenant log isolation
                     )
                     if blob_handler:
                         logger.info(f"[AUTH] Azure Blob Storage logging updated: {blob_path}")
-                        print(f"[AUTH] ✓ Azure Blob Storage logging updated with account: {account_holder_name}")
+                        print(f"[AUTH] ✓ Azure Blob Storage logging updated with account: {account_name}")
             except Exception as e:
                 print(f"[AUTH] Warning: Could not update Azure Blob logging: {e}")
-            
-            # Store API key if provided
-            if data.get('api_key'):
-                kite_api_key = api_key
             
             return jsonify({
                 'success': True,
                 'message': 'Connected successfully',
                 'authenticated': True,
-                'account_name': account_holder_name
+                'account_name': account_name
             })
         except Exception as e:
             return jsonify({
@@ -3594,7 +3605,7 @@ def set_access_token():
 def check_connectivity():
     """Check system connectivity status"""
     try:
-        global strategy_bot, kite_client_global
+        global strategy_bot
         
         # CRITICAL: First check if user is authenticated via session
         is_authenticated = SaaSSessionManager.is_authenticated()
@@ -3612,46 +3623,32 @@ def check_connectivity():
         if not is_authenticated:
             return jsonify(connectivity)
         
-        # Try to load credentials from session and sync with global client
-        try:
-            creds = SaaSSessionManager.get_credentials()
-            if creds.get('access_token') and not kite_client_global:
-                # Try to recreate kite client from session credentials
-                global kite_api_key, kite_api_secret
-                kite_api_key = creds.get('api_key', '')
-                kite_api_secret = creds.get('api_secret', '')
-                if kite_api_key and kite_api_secret and creds.get('access_token'):
-                    try:
-                        from src.kite_client import KiteClient
-                    except ImportError:
-                        from kite_client import KiteClient
-                    kite_client_global = KiteClient(
-                        kite_api_key,
-                        kite_api_secret,
-                        access_token=creds.get('access_token'),
-                        account=creds.get('full_name', 'DASHBOARD')
-                    )
-        except Exception as e:
-            logging.warning(f"[CONNECTIVITY] Could not sync session credentials: {e}")
+        # Try to load credentials from session and use per-session client
+        creds = SaaSSessionManager.get_credentials()
+        broker_id = creds.get('broker_id') or creds.get('api_key')
+        device_id = creds.get('device_id') or SaaSSessionManager.get_device_id()
+        cache_key = _kite_client_key(broker_id, device_id) if broker_id and device_id else None
+        if cache_key:
+            with _kite_status_lock:
+                cached = _kite_status_cache.get(cache_key)
+            if cached:
+                cached_time, cached_data = cached
+                if (time.time() - cached_time) < KITE_STATUS_TTL_SECONDS:
+                    cached_response = dict(cached_data)
+                    cached_response['last_check'] = datetime.now().isoformat()
+                    return jsonify(cached_response)
         
-        # Check global kite client first
-        if kite_client_global and hasattr(kite_client_global, 'kite'):
-            is_valid, result = validate_kite_connection(kite_client_global)
+        kite_client = get_session_kite_client(creds)
+        if kite_client and hasattr(kite_client, 'kite'):
+            is_valid, result = validate_kite_connection(kite_client)
             if is_valid:
                 connectivity['api_authenticated'] = True
                 connectivity['api_connected'] = True
                 connectivity['status_message'] = 'API Connected'
             else:
-                connectivity['api_authenticated'] = kite_client_global.access_token is not None
+                connectivity['api_authenticated'] = getattr(kite_client, 'access_token', None) is not None
                 connectivity['api_connected'] = False
                 connectivity['status_message'] = f'API Error: {result[:50]}'
-                
-                # Try auto-reconnection
-                if kite_api_key:
-                    if reconnect_kite_client():
-                        connectivity['api_authenticated'] = True
-                        connectivity['api_connected'] = True
-                        connectivity['status_message'] = 'API Connected (reconnected)'
         
         # Also check bot's kite client
         if not connectivity['api_connected'] and strategy_bot and hasattr(strategy_bot, 'kite_client'):
@@ -3671,7 +3668,9 @@ def check_connectivity():
             connectivity['status_message'] = 'Not Authenticated'
         
         connectivity['connected'] = connectivity['api_connected']
-        
+        if cache_key:
+            with _kite_status_lock:
+                _kite_status_cache[cache_key] = (time.time(), dict(connectivity))
         return jsonify(connectivity)
     except Exception as e:
         return jsonify({
@@ -3795,11 +3794,14 @@ def update_config_file(param_name, new_value):
 
 def initialize_dashboard():
     """Initialize dashboard and attempt to reconnect if token exists"""
-    global kite_api_key
     try:
-        # Try to load saved token if API key is available
+        # Avoid global reconnect in multi-user cloud environments
+        if IS_PRODUCTION:
+            logging.info("[INIT] Skipping global token reconnect in cloud environment")
+            return
+        # Try to load saved token if API key is available (local only)
         if kite_api_key:
-            logging.info("[INIT] Attempting to reconnect with saved token...")
+            logging.info("[INIT] Attempting to reconnect with saved token (local)...")
             if reconnect_kite_client():
                 logging.info("[INIT] Successfully reconnected on startup")
             else:
