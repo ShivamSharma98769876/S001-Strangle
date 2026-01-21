@@ -16,6 +16,7 @@ import logging
 import secrets
 import base64
 from typing import Tuple, Optional
+from config import VIX_INSTRUMENT_TOKEN, VIX_DELTA_THRESHOLD
 
 # IST Timezone for consistent timestamps
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -1168,6 +1169,8 @@ def get_current_config():
                     'VIX_DELTA_THRESHOLD': getattr(config, 'VIX_DELTA_THRESHOLD', 13),
                     'VIX_HEDGE_POINTS_CANDR': getattr(config, 'VIX_HEDGE_POINTS_CANDR', 16),
                     'DELTA_MONITORING_THRESHOLD': getattr(config, 'DELTA_MONITORING_THRESHOLD', 0.225),
+                    'DELTA_MONITORING_THRESHOLD_HIGH_VIX': getattr(config, 'DELTA_MONITORING_THRESHOLD_HIGH_VIX', 0.24),
+                    'DELTA_MONITORING_THRESHOLD_LOW_VIX': getattr(config, 'DELTA_MONITORING_THRESHOLD_LOW_VIX', 0.25),
                     'DELTA_MIN': getattr(config, 'DELTA_MIN', 0.29),
                     'DELTA_MAX': getattr(config, 'DELTA_MAX', 0.36),
                     'HEDGE_TRIGGER_POINTS': getattr(config, 'HEDGE_TRIGGER_POINTS', 16),
@@ -1203,6 +1206,26 @@ def get_current_config():
             'status': 'error',
             'message': str(e)
         }), 500
+
+@app.route('/api/vix/current')
+@require_authentication
+def get_current_vix():
+    """Get current VIX value for UI display."""
+    try:
+        creds = SaaSSessionManager.get_credentials()
+        kite_client = get_session_kite_client(creds)
+        if not kite_client or not hasattr(kite_client, 'kite'):
+            return jsonify({'success': False, 'error': 'Kite client not available'}), 400
+        vix_data = kite_client.kite.ltp(VIX_INSTRUMENT_TOKEN)
+        current_vix = vix_data[VIX_INSTRUMENT_TOKEN]['last_price']
+        return jsonify({
+            'success': True,
+            'current_vix': current_vix,
+            'threshold': VIX_DELTA_THRESHOLD
+        })
+    except Exception as e:
+        logger.error(f"[VIX] Error fetching current VIX: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/config/lot-size', methods=['GET'])
 @require_authentication

@@ -1746,10 +1746,21 @@
                         <small>Maximum allowed delta for initial trade selection</small>
                     </div>
                     <div class="admin-param-group">
-                        <label for="deltaMonitoringThreshold">Delta Monitoring Threshold</label>
-                        <input type="number" id="deltaMonitoringThreshold" step="0.01" min="0" max="1"
-                               onchange="updateAdminParameter('DELTA_MONITORING_THRESHOLD', parseFloat(this.value), this)">
-                        <small>Threshold for monitoring - if delta goes below this, modify SL</small>
+                        <label for="deltaMonitoringThresholdHighVix">Delta Monitoring Threshold (VIX > 13)</label>
+                        <input type="number" id="deltaMonitoringThresholdHighVix" step="0.01" min="0" max="1"
+                               onchange="updateAdminParameter('DELTA_MONITORING_THRESHOLD_HIGH_VIX', parseFloat(this.value), this)">
+                        <small>Threshold when VIX > 13</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="deltaMonitoringThresholdLowVix">Delta Monitoring Threshold (VIX ≤ 13)</label>
+                        <input type="number" id="deltaMonitoringThresholdLowVix" step="0.01" min="0" max="1"
+                               onchange="updateAdminParameter('DELTA_MONITORING_THRESHOLD_LOW_VIX', parseFloat(this.value), this)">
+                        <small>Threshold when VIX ≤ 13</small>
+                    </div>
+                    <div class="admin-param-group">
+                        <label for="deltaMonitoringThresholdCurrent">Current Dynamic Threshold</label>
+                        <input type="number" id="deltaMonitoringThresholdCurrent" step="0.01" min="0" max="1" readonly>
+                        <small id="deltaMonitoringThresholdNote">Shows current threshold based on VIX</small>
                     </div>
                 </div>
             </div>
@@ -2524,9 +2535,13 @@
             }
             
             // Delta Configuration
-            if (config.DELTA_MONITORING_THRESHOLD !== undefined) {
-                document.getElementById('deltaMonitoringThreshold').value = config.DELTA_MONITORING_THRESHOLD;
+            if (config.DELTA_MONITORING_THRESHOLD_HIGH_VIX !== undefined) {
+                document.getElementById('deltaMonitoringThresholdHighVix').value = config.DELTA_MONITORING_THRESHOLD_HIGH_VIX;
             }
+            if (config.DELTA_MONITORING_THRESHOLD_LOW_VIX !== undefined) {
+                document.getElementById('deltaMonitoringThresholdLowVix').value = config.DELTA_MONITORING_THRESHOLD_LOW_VIX;
+            }
+            updateDeltaMonitoringThreshold();
             if (config.DELTA_MIN !== undefined) {
                 document.getElementById('deltaMin').value = config.DELTA_MIN;
             }
@@ -2579,6 +2594,37 @@
                     document.getElementById('slFriday').value = slConfig.Friday || slConfig.default || 30;
                     document.getElementById('slMonday').value = slConfig.Monday || slConfig.default || 30;
                     document.getElementById('slDefault').value = slConfig.default || 30;
+                }
+            }
+        }
+
+        async function updateDeltaMonitoringThreshold() {
+            const input = document.getElementById('deltaMonitoringThresholdCurrent');
+            const note = document.getElementById('deltaMonitoringThresholdNote');
+            const highVixInput = document.getElementById('deltaMonitoringThresholdHighVix');
+            const lowVixInput = document.getElementById('deltaMonitoringThresholdLowVix');
+            if (!input) return;
+            try {
+                const response = await fetch('/api/vix/current', { credentials: 'include' });
+                if (!response.ok) {
+                    throw new Error('VIX fetch failed');
+                }
+                const data = await response.json();
+                if (!data.success || data.current_vix === undefined) {
+                    throw new Error(data.error || 'VIX unavailable');
+                }
+                const threshold = data.threshold !== undefined ? data.threshold : 13;
+                const vix = data.current_vix;
+                const highVixThreshold = highVixInput ? parseFloat(highVixInput.value) || 0.24 : 0.24;
+                const lowVixThreshold = lowVixInput ? parseFloat(lowVixInput.value) || 0.25 : 0.25;
+                const dynamicValue = vix > threshold ? highVixThreshold : lowVixThreshold;
+                input.value = dynamicValue.toFixed(2);
+                if (note) {
+                    note.textContent = `Current: VIX ${vix.toFixed(2)} ${vix > threshold ? '>' : '<='} ${threshold} → ${dynamicValue.toFixed(2)}`;
+                }
+            } catch (e) {
+                if (note) {
+                    note.textContent = 'Current: VIX unavailable (uses strategy default logic)';
                 }
             }
         }

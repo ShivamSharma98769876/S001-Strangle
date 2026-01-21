@@ -57,6 +57,8 @@ class ConfigMonitor:
             'STOP_LOSS_CONFIG',
             'VWAP_MAX_PRICE_DIFF_PERCENT',
             'DELTA_MONITORING_THRESHOLD',
+            'DELTA_MONITORING_THRESHOLD_HIGH_VIX',
+            'DELTA_MONITORING_THRESHOLD_LOW_VIX',
             'INITIAL_PROFIT_BOOKING',
             'SECOND_PROFIT_BOOKING'
         ]
@@ -279,6 +281,8 @@ class ConfigMonitor:
             'VIX_DELTA_HIGH': lambda x: isinstance(x, (int, float)) and 0 < x < 1,
             'VIX_DELTA_THRESHOLD': lambda x: isinstance(x, (int, float)) and 0 < x <= 100,
             'DELTA_MONITORING_THRESHOLD': lambda x: isinstance(x, (int, float)) and 0 < x < 1,
+            'DELTA_MONITORING_THRESHOLD_HIGH_VIX': lambda x: isinstance(x, (int, float)) and 0 < x < 1,
+            'DELTA_MONITORING_THRESHOLD_LOW_VIX': lambda x: isinstance(x, (int, float)) and 0 < x < 1,
             'INITIAL_PROFIT_BOOKING': lambda x: isinstance(x, (int, float)) and 0 < x <= 200,
             'SECOND_PROFIT_BOOKING': lambda x: isinstance(x, (int, float)) and 0 < x <= 200
         }

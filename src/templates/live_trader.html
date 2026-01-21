@@ -593,6 +593,14 @@
         .log-entry.error {
             color: #f87171;
         }
+        .num-positive { color: #22c55e; font-weight: 600; }
+        .num-negative { color: #f59e0b; font-weight: 600; }
+        .ansi-91 { color: #ef4444; }
+        .ansi-92 { color: #22c55e; }
+        .ansi-93 { color: #f59e0b; }
+        .ansi-94 { color: #3b82f6; }
+        .ansi-95 { color: #a855f7; }
+        .ansi-96 { color: #06b6d4; }
 
         .log-timestamp {
             color: var(--text-secondary);
@@ -1851,10 +1859,11 @@
             timestampSpan.textContent = `[${timestamp}]`;
             
             const textSpan = document.createElement('span');
-            textSpan.textContent = logMessage || logText;
+            const messageText = logMessage || logText;
+            textSpan.innerHTML = formatLogMessage(messageText);
             
             // Determine log level from log text
-            const logLower = logText.toLowerCase();
+            const logLower = stripAnsi(logText).toLowerCase();
             if (logLower.includes('error') || logLower.includes('critical') || logLower.includes('exception')) {
                 entry.className += ' error';
             } else if (logLower.includes('warning') || logLower.includes('warn')) {
@@ -1871,6 +1880,46 @@
             entry.appendChild(textSpan);
             
             return entry;
+        }
+
+        function stripAnsi(text) {
+            return String(text || '').replace(/\x1b\[[0-9;]*m/g, '');
+        }
+
+        function escapeHtml(text) {
+            return String(text || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function formatLogMessage(text) {
+            const cleaned = stripAnsi(text);
+            let html = escapeHtml(cleaned);
+            const lower = cleaned.toLowerCase();
+            if (lower.includes('pnl') || lower.includes('profit') || lower.includes('loss')) {
+                html = colorizeNumbers(html);
+            }
+            return html;
+        }
+
+        function colorizeNumbers(html) {
+            return html.replace(/([+-]?\d[\d,]*\.?\d*)/g, (match) => {
+                const normalized = match.replace(/,/g, '');
+                const value = parseFloat(normalized);
+                if (Number.isNaN(value)) {
+                    return match;
+                }
+                if (value < 0) {
+                    return `<span class="num-negative">${match}</span>`;
+                }
+                if (value > 0) {
+                    return `<span class="num-positive">${match}</span>`;
+                }
+                return match;
+            });
         }
 
         function updateAccountNameDisplay(accountName) {

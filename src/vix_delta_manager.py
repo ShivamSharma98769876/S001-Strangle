@@ -35,17 +35,21 @@ class VIXDeltaManager:
             tuple: (delta_low, delta_high, hedge_points, use_next_week_expiry)
         """
         try:
-            # Get current VIX average
+            # Get current VIX
             vix_summary = self.vix_calculator.get_vix_summary()
-            average_vix = vix_summary.get('average_vix')
+            current_vix = vix_summary.get('current_vix')
             
-            if average_vix is None:
+            if current_vix is None:
                 logging.warning("Unable to get VIX data, using default delta range")
                 return self._get_default_delta_range()
             
-            # Check if average VIX is below threshold
-            if average_vix < VIX_DELTA_THRESHOLD:
-                logging.info(f"Average VIX ({average_vix:.2f}) is below threshold ({VIX_DELTA_THRESHOLD}), using VIX-based delta range")
+            # Check if current VIX is above threshold
+            if current_vix > VIX_DELTA_THRESHOLD:
+                logging.info(f"Current VIX ({current_vix:.2f}) is above threshold ({VIX_DELTA_THRESHOLD}), using default delta range")
+                self.using_vix_based_delta = False
+                return self._get_default_delta_range()
+            else:
+                logging.info(f"Current VIX ({current_vix:.2f}) is at/below threshold ({VIX_DELTA_THRESHOLD}), using VIX-based delta range")
                 self.using_vix_based_delta = True
                 self.current_delta_low = VIX_DELTA_LOW
                 self.current_delta_high = VIX_DELTA_HIGH
@@ -58,10 +62,6 @@ class VIXDeltaManager:
                     VIX_HEDGE_POINTS,
                     True  # Use next week expiry
                 )
-            else:
-                logging.info(f"Average VIX ({average_vix:.2f}) is above threshold ({VIX_DELTA_THRESHOLD}), using default delta range")
-                self.using_vix_based_delta = False
-                return self._get_default_delta_range()
                 
         except Exception as e:
             logging.error(f"Error getting delta range based on VIX: {e}")
@@ -159,22 +159,22 @@ class VIXDeltaManager:
                 'reason': 'Error fetching VIX data'
             }
     
-    def _get_delta_reason(self, average_vix):
+    def _get_delta_reason(self, current_vix):
         """
         Get the reason for current delta configuration
         
         Args:
-            average_vix: Current average VIX value
+            current_vix: Current VIX value
             
         Returns:
             str: Reason for delta configuration
         """
-        if average_vix is None:
+        if current_vix is None:
             return "Using default delta range (VIX data unavailable)"
-        elif average_vix < VIX_DELTA_THRESHOLD:
-            return f"Using VIX-based delta range (VIX {average_vix:.2f} < {VIX_DELTA_THRESHOLD})"
+        elif current_vix <= VIX_DELTA_THRESHOLD:
+            return f"Using VIX-based delta range (VIX {current_vix:.2f} <= {VIX_DELTA_THRESHOLD})"
         else:
-            return f"Using default delta range (VIX {average_vix:.2f} >= {VIX_DELTA_THRESHOLD})"
+            return f"Using default delta range (VIX {current_vix:.2f} > {VIX_DELTA_THRESHOLD})"
     
     def log_delta_configuration(self):
         """

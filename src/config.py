@@ -90,7 +90,9 @@ MIN_IV_THRESHOLD = 8.8  # Minimum IV threshold for individual strikes (25.0%)
 # Delta Range Configuration
 DELTA_MIN = 0.29  # Minimum allowed delta for initial trade selection
 DELTA_MAX = 0.36  # Maximum allowed delta for initial trade selection
-DELTA_MONITORING_THRESHOLD = 0.225 #Threshold for monitoring - if delta goes below this, modify SL
+DELTA_MONITORING_THRESHOLD = 0.225 #Threshold for monitoring - if delta goes below this, modify SL (legacy, kept for backward compatibility)
+DELTA_MONITORING_THRESHOLD_HIGH_VIX = 0.24  # Threshold when VIX > 13
+DELTA_MONITORING_THRESHOLD_LOW_VIX = 0.25  # Threshold when VIX <= 13
 DELTA_MONITORING_ENABLED = True  # Enable continuous delta monitoring
 
 # IV Display Configuration

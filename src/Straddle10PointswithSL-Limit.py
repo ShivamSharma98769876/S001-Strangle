@@ -433,6 +433,16 @@ def get_india_vix():
 
     return india_vix / 100  # Return the latest VIX divided by 100 for annual volatility
 
+def get_delta_monitoring_threshold():
+    """Return delta monitoring threshold based on current VIX."""
+    current_vix = get_india_vix()
+    if current_vix is None:
+        return DELTA_MONITORING_THRESHOLD
+    current_vix_display = current_vix * 100
+    if current_vix_display > VIX_DELTA_THRESHOLD:
+        return DELTA_MONITORING_THRESHOLD_HIGH_VIX
+    return DELTA_MONITORING_THRESHOLD_LOW_VIX
+
 
 def calculate_ivr(current_iv, historical_iv_data=None):
     """
@@ -2358,9 +2368,10 @@ def monitor_trades(call_order_id, put_order_id, call_strike, put_strike, call_sl
 
         # Enhanced delta range monitoring
         if DELTA_MONITORING_ENABLED:
-            # Check if delta is below monitoring threshold (0.26)
-            call_delta_below_threshold = call_delta < DELTA_MONITORING_THRESHOLD
-            put_delta_below_threshold = put_delta < DELTA_MONITORING_THRESHOLD
+            # Check if delta is below monitoring threshold (VIX-based)
+            delta_monitoring_threshold = get_delta_monitoring_threshold()
+            call_delta_below_threshold = call_delta < delta_monitoring_threshold
+            put_delta_below_threshold = put_delta < delta_monitoring_threshold
             
             # Calculate IV for individual strikes if IV display is enabled
             call_iv = None
@@ -2376,27 +2387,27 @@ def monitor_trades(call_order_id, put_order_id, call_strike, put_strike, call_sl
             call_iv_str = f" | IV: {call_iv:.1f}%" if call_iv is not None else ""
             put_iv_str = f" | IV: {put_iv:.1f}%" if put_iv is not None else ""
             
-            logging.info(f"Delta Monitoring - Call: {call_delta:.3f} ({'WARNING' if call_delta_below_threshold else 'OK'} threshold: {DELTA_MONITORING_THRESHOLD}) [SL Modified: {call_sl_modified_for_delta}]{call_iv_str}")
-            logging.info(f"Delta Monitoring - Put:  {put_delta:.3f} ({'WARNING' if put_delta_below_threshold else 'OK'} threshold: {DELTA_MONITORING_THRESHOLD}) [SL Modified: {put_sl_modified_for_delta}]{put_iv_str}")
+            logging.info(f"Delta Monitoring - Call: {call_delta:.3f} ({'WARNING' if call_delta_below_threshold else 'OK'} threshold: {delta_monitoring_threshold}) [SL Modified: {call_sl_modified_for_delta}]{call_iv_str}")
+            logging.info(f"Delta Monitoring - Put:  {put_delta:.3f} ({'WARNING' if put_delta_below_threshold else 'OK'} threshold: {delta_monitoring_threshold}) [SL Modified: {put_sl_modified_for_delta}]{put_iv_str}")
             
             # Check if either delta is below the monitoring threshold
             if call_delta_below_threshold or put_delta_below_threshold:
                 # Update stop-loss for the side with low delta (only once per side)
                 if call_delta_below_threshold and not call_sl_modified_for_delta:
-                    logging.warning(f"Call delta ({call_delta:.3f}) below threshold ({DELTA_MONITORING_THRESHOLD}), updating stop-loss")
+                    logging.warning(f"Call delta ({call_delta:.3f}) below threshold ({delta_monitoring_threshold}), updating stop-loss")
                     modify_stop_loss_order(call_sl_order_id, call_ltp + 1, call_ltp + 2)
                     call_sl_modified_for_delta = True
                     logging.info(f"Call SL modified for delta threshold. Flag set to prevent further modifications.")
                 elif call_delta_below_threshold and call_sl_modified_for_delta:
-                    logging.info(f"Call delta ({call_delta:.3f}) still below threshold ({DELTA_MONITORING_THRESHOLD}), but SL already modified.")
+                    logging.info(f"Call delta ({call_delta:.3f}) still below threshold ({delta_monitoring_threshold}), but SL already modified.")
                 
                 if put_delta_below_threshold and not put_sl_modified_for_delta:
-                    logging.warning(f"Put delta ({put_delta:.3f}) below threshold ({DELTA_MONITORING_THRESHOLD}), updating stop-loss")
+                    logging.warning(f"Put delta ({put_delta:.3f}) below threshold ({delta_monitoring_threshold}), updating stop-loss")
                     modify_stop_loss_order(put_sl_order_id, put_ltp + 1, put_ltp + 2)
                     put_sl_modified_for_delta = True
                     logging.info(f"Put SL modified for delta threshold. Flag set to prevent further modifications.")
                 elif put_delta_below_threshold and put_sl_modified_for_delta:
-                    logging.info(f"Put delta ({put_delta:.3f}) still below threshold ({DELTA_MONITORING_THRESHOLD}), but SL already modified.")
+                    logging.info(f"Put delta ({put_delta:.3f}) still below threshold ({delta_monitoring_threshold}), but SL already modified.")
         else:
             # Legacy delta monitoring
             if abs(call_delta) > TARGET_DELTA_HIGH + 0.1 or abs(put_delta) > TARGET_DELTA_HIGH + 0.1:
