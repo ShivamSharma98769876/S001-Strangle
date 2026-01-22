@@ -88,12 +88,59 @@ function hideAuthModal() {
     }
 }
 
+// Helper function to get JWT token from URL (for initial page load)
+function getJwtTokenFromUrl() {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('sso_token');
+}
+
+// Helper function to add JWT token to request body for POST requests (security improvement)
+function addJwtTokenToBody(options) {
+    if (!options) options = {};
+    
+    const method = (options.method || 'GET').toUpperCase();
+    const isPostRequest = ['POST', 'PUT', 'PATCH'].includes(method);
+    
+    if (isPostRequest) {
+        const jwtToken = getJwtTokenFromUrl();
+        if (jwtToken) {
+            // Ensure headers exist
+            if (!options.headers) {
+                options.headers = {};
+            }
+            // Ensure Content-Type is set for JSON
+            if (!options.headers['Content-Type'] && !options.headers['content-type']) {
+                options.headers['Content-Type'] = 'application/json';
+            }
+            
+            // Parse existing body or create new one
+            let bodyData = {};
+            if (options.body) {
+                try {
+                    bodyData = typeof options.body === 'string' ? JSON.parse(options.body) : options.body;
+                } catch (e) {
+                    // If body is not JSON, skip adding token to body
+                    console.warn('[FETCH] Could not parse body as JSON, skipping JWT token in body');
+                    return options;
+                }
+            }
+            
+            // Add JWT token to body (only if we successfully parsed it)
+            if (typeof bodyData === 'object' && bodyData !== null) {
+                bodyData.sso_token = jwtToken;
+                options.body = JSON.stringify(bodyData);
+            }
+        }
+    }
+    
+    return options;
+}
+
 // JWT Token Preservation for Navigation
 // This ensures JWT token is preserved when navigating between pages
 function preserveJwtTokenInLinks() {
     // Extract JWT token from current URL
-    const urlParams = new URLSearchParams(window.location.search);
-    const ssoToken = urlParams.get('sso_token');
+    const ssoToken = getJwtTokenFromUrl();
     
     if (!ssoToken) {
         return; // No token to preserve
@@ -233,7 +280,7 @@ async function authenticateWithAccessToken(event) {
     errorDiv.textContent = '';
     
     try {
-        const response = await fetch('/api/auth/set-access-token', {
+        const response = await fetch('/api/auth/set-access-token', addJwtTokenToBody({
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             credentials: 'include',
@@ -242,7 +289,7 @@ async function authenticateWithAccessToken(event) {
                 api_secret: apiSecret,
                 access_token: accessToken
             })
-        });
+        }));
         
         // Handle non-JSON responses (like 401 errors)
         let data;
@@ -290,7 +337,7 @@ async function authenticateWithRequestToken(event) {
     submitBtn.textContent = 'Generating...';
     
     try {
-        const response = await fetch('/api/auth/generate-access-token', {
+        const response = await fetch('/api/auth/generate-access-token', addJwtTokenToBody({
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             credentials: 'include',
@@ -299,7 +346,7 @@ async function authenticateWithRequestToken(event) {
                 api_secret: apiSecret,
                 request_token: requestToken
             })
-        });
+        }));
         
         // Handle non-JSON responses (like 401 errors)
         let data;
@@ -532,12 +579,12 @@ async function syncOrdersFromZerodha() {
     btn.textContent = 'Syncing...';
     
     try {
-        const response = await fetch('/api/sync/orders', {
+        const response = await fetch('/api/sync/orders', addJwtTokenToBody({
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({}),
             credentials: 'include'
-        });
+        }));
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -968,11 +1015,11 @@ async function disconnectZerodha() {
     }
     
     try {
-        const response = await fetch('/api/auth/disconnect', {
+        const response = await fetch('/api/auth/disconnect', addJwtTokenToBody({
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             credentials: 'include'
-        });
+        }));
         
         const data = await response.json();
         

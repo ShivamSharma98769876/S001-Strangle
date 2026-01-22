@@ -520,8 +520,21 @@ def require_jwt_token_in_cloud() -> Tuple[bool, Optional[str], Optional[dict]]:
         session.pop('jwt_token', None)
         session.pop('jwt_payload', None)
     
-    # Check for sso_token in query string OR headers (for flexibility)
-    sso_token = request.args.get('sso_token') or request.headers.get('X-SSO-Token')
+    # Check for sso_token in request body (for POST requests), query string, or headers (in order of preference for security)
+    sso_token = None
+    
+    # First, check request body for POST/PUT requests (most secure - not in URL)
+    if request.is_json and isinstance(request.json, dict):
+        sso_token = request.json.get('sso_token')
+    
+    # If not in body, check query string (for GET requests and initial page loads)
+    if not sso_token:
+        sso_token = request.args.get('sso_token')
+    
+    # If not in query, check headers (for API clients)
+    if not sso_token:
+        sso_token = request.headers.get('X-SSO-Token')
+    
     if not sso_token:
         main_app_url = get_main_app_url()
         if not main_app_url:

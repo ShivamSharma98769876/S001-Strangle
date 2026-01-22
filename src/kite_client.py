@@ -9,7 +9,9 @@ from config import VIX_INSTRUMENT_TOKEN, VIX_FETCH_INTERVAL, VWAP_MINUTES
 
 # Retry configuration
 MAX_RETRIES = 3
+MAX_RETRIES_GATEWAY_TIMEOUT = 5  # More retries for gateway timeout errors
 INITIAL_BACKOFF_SECONDS = 1.0
+INITIAL_BACKOFF_GATEWAY_TIMEOUT = 2.0  # Longer initial backoff for gateway timeouts
 MAX_BACKOFF_SECONDS = 10.0
 CONSECUTIVE_ERROR_THRESHOLD = 5  # Alert after this many consecutive errors
 
@@ -43,11 +45,12 @@ def is_retryable_error(error_message: str) -> bool:
 def retry_with_backoff(func, *args, max_retries=MAX_RETRIES, **kwargs):
     """
     Execute a function with exponential backoff retry logic.
+    Uses more retries and longer backoff for gateway timeout errors (504).
     
     Args:
         func: Function to execute
         *args: Positional arguments to pass to func
-        max_retries: Maximum number of retry attempts
+        max_retries: Maximum number of retry attempts (default)
         **kwargs: Keyword arguments to pass to func
         
     Returns:
@@ -55,8 +58,10 @@ def retry_with_backoff(func, *args, max_retries=MAX_RETRIES, **kwargs):
     """
     last_exception = None
     backoff = INITIAL_BACKOFF_SECONDS
+    effective_max_retries = max_retries
+    attempt = 0
     
-    for attempt in range(max_retries + 1):
+    while attempt <= effective_max_retries:
         try:
             return func(*args, **kwargs)
         except Exception as e:
@@ -68,17 +73,28 @@ def retry_with_backoff(func, *args, max_retries=MAX_RETRIES, **kwargs):
                 logging.error(f"Non-retryable error: {error_msg}")
                 raise
             
-            if attempt < max_retries:
+            # Check if this is a gateway timeout error (504) on first attempt
+            if attempt == 0:
+                is_gateway_timeout = "504" in error_msg or "gateway time-out" in error_msg.lower() or "gateway timeout" in error_msg.lower()
+                if is_gateway_timeout:
+                    # Use more retries and longer backoff for gateway timeouts
+                    effective_max_retries = MAX_RETRIES_GATEWAY_TIMEOUT
+                    backoff = INITIAL_BACKOFF_GATEWAY_TIMEOUT
+                    logging.info(f"Detected gateway timeout error, using extended retry strategy ({effective_max_retries} retries)")
+            
+            if attempt < effective_max_retries:
                 logging.warning(
-                    f"Retryable error (attempt {attempt + 1}/{max_retries + 1}): {error_msg}. "
+                    f"Retryable error (attempt {attempt + 1}/{effective_max_retries + 1}): {error_msg}. "
                     f"Retrying in {backoff:.1f}s..."
                 )
                 time_module.sleep(backoff)
                 backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
+                attempt += 1
             else:
                 logging.warning(
-                    f"All {max_retries + 1} attempts failed. Last error: {error_msg}"
+                    f"All {effective_max_retries + 1} attempts failed. Last error: {error_msg}"
                 )
+                break
     
     raise last_exception
 

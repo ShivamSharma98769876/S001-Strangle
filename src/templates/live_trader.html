@@ -736,7 +736,10 @@
             </div>
             <div class="status-card success" id="engineStatusCard">
                 <div class="status-card-label">Engine Status</div>
-                <div class="status-card-value" id="engineStatusValue">Stopped</div>
+                <div class="status-card-value" id="engineStatusValue">
+                    <i class="fas fa-sync-alt" id="engineStatusIcon" style="margin-right: 8px;"></i>
+                    <span id="engineStatusText">Stopped</span>
+                </div>
             </div>
             <div class="status-card" id="kiteStatusCard">
                 <div class="status-card-label">Kite Connectivity</div>
@@ -980,11 +983,53 @@
             }
         }
 
+        // Helper function to get JWT token from URL (for initial page load)
+        function getJwtTokenFromUrl() {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get('sso_token');
+        }
+
         // Helper function for fetch with timeout and proper error handling
         // OPTIMIZED: Better handling of Azure gateway timeouts and non-JSON responses
+        // SECURITY: JWT token is sent in request body for POST requests (not in URL)
         async function fetchWithTimeout(url, options = {}, timeout = 10000) {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), timeout);
+            
+            // For POST/PUT/PATCH requests, add JWT token to body if available
+            const method = (options.method || 'GET').toUpperCase();
+            const isPostRequest = ['POST', 'PUT', 'PATCH'].includes(method);
+            
+            if (isPostRequest) {
+                const jwtToken = getJwtTokenFromUrl();
+                if (jwtToken) {
+                    // Ensure options has headers
+                    if (!options.headers) {
+                        options.headers = {};
+                    }
+                    // Ensure Content-Type is set for JSON
+                    if (!options.headers['Content-Type'] && !options.headers['content-type']) {
+                        options.headers['Content-Type'] = 'application/json';
+                    }
+                    
+                    // Parse existing body or create new one
+                    let bodyData = {};
+                    if (options.body) {
+                        try {
+                            bodyData = typeof options.body === 'string' ? JSON.parse(options.body) : options.body;
+                        } catch (e) {
+                            // If body is not JSON, skip adding token to body
+                            console.warn('[FETCH] Could not parse body as JSON, skipping JWT token in body');
+                        }
+                    }
+                    
+                    // Add JWT token to body (only if we successfully parsed it)
+                    if (typeof bodyData === 'object' && bodyData !== null) {
+                        bodyData.sso_token = jwtToken;
+                        options.body = JSON.stringify(bodyData);
+                    }
+                }
+            }
             
             try {
                 const response = await fetch(url, {
@@ -1277,6 +1322,8 @@
                 const engineStatus = document.getElementById('engineStatus');
                 const engineStatusValue = document.getElementById('engineStatusValue');
                 const engineStatusCard = document.getElementById('engineStatusCard');
+                const engineStatusIcon = document.getElementById('engineStatusIcon');
+                const engineStatusText = document.getElementById('engineStatusText');
                 const startBtn = document.getElementById('startBtn');
                 const stopBtn = document.getElementById('stopBtn');
                 
@@ -1287,9 +1334,15 @@
                         engineStatus.className = 'status-badge engine-running';
                         engineStatus.innerHTML = '<i class="fas fa-cog fa-spin"></i><span>Engine: Running</span>';
                     }
-                    // Update status card
-                    if (engineStatusValue) {
-                        engineStatusValue.textContent = 'Running';
+                    // Update status card with rotating icon
+                    if (engineStatusIcon) {
+                        engineStatusIcon.classList.add('fa-spin');
+                    }
+                    if (engineStatusText) {
+                        engineStatusText.textContent = 'Running';
+                    } else if (engineStatusValue) {
+                        // Fallback if structure changed
+                        engineStatusValue.innerHTML = '<i class="fas fa-sync-alt fa-spin" style="margin-right: 8px;"></i><span>Running</span>';
                     }
                     if (engineStatusCard) {
                         engineStatusCard.className = 'status-card success';
@@ -1311,9 +1364,15 @@
                         engineStatus.className = 'status-badge engine-stopped';
                         engineStatus.innerHTML = '<i class="fas fa-cog"></i><span>Engine: Stopped</span>';
                     }
-                    // Update status card
-                    if (engineStatusValue) {
-                        engineStatusValue.textContent = 'Stopped';
+                    // Update status card - stop rotation
+                    if (engineStatusIcon) {
+                        engineStatusIcon.classList.remove('fa-spin');
+                    }
+                    if (engineStatusText) {
+                        engineStatusText.textContent = 'Stopped';
+                    } else if (engineStatusValue) {
+                        // Fallback if structure changed
+                        engineStatusValue.innerHTML = '<i class="fas fa-sync-alt" style="margin-right: 8px;"></i><span>Stopped</span>';
                     }
                     if (engineStatusCard) {
                         engineStatusCard.className = 'status-card danger';

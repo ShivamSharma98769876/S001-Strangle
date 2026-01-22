@@ -131,7 +131,9 @@ vwap_cache_time = {}  # Cache timestamps for VWAP data
 
 # Retry configuration for robust API calls
 MAX_LTP_RETRIES = 3
+MAX_LTP_RETRIES_GATEWAY_TIMEOUT = 5  # More retries for gateway timeout errors
 INITIAL_BACKOFF_SECONDS = 1.0
+INITIAL_BACKOFF_GATEWAY_TIMEOUT = 2.0  # Longer initial backoff for gateway timeouts
 MAX_BACKOFF_SECONDS = 10.0
 CONSECUTIVE_ERROR_THRESHOLD = 5  # Alert after this many consecutive errors
 consecutive_ltp_errors = 0  # Track consecutive LTP fetch errors
@@ -167,11 +169,12 @@ def is_retryable_error(error_message: str) -> bool:
 def retry_api_call(api_func, *args, max_retries=MAX_LTP_RETRIES, **kwargs):
     """
     Execute an API call with exponential backoff retry logic.
+    Uses more retries and longer backoff for gateway timeout errors (504).
     
     Args:
         api_func: API function to execute
         *args: Positional arguments to pass to api_func
-        max_retries: Maximum number of retry attempts
+        max_retries: Maximum number of retry attempts (default)
         **kwargs: Keyword arguments to pass to api_func
         
     Returns:
@@ -182,8 +185,10 @@ def retry_api_call(api_func, *args, max_retries=MAX_LTP_RETRIES, **kwargs):
     """
     last_exception = None
     backoff = INITIAL_BACKOFF_SECONDS
+    effective_max_retries = max_retries
+    attempt = 0
     
-    for attempt in range(max_retries + 1):
+    while attempt <= effective_max_retries:
         try:
             return api_func(*args, **kwargs)
         except Exception as e:
@@ -194,13 +199,26 @@ def retry_api_call(api_func, *args, max_retries=MAX_LTP_RETRIES, **kwargs):
                 # Non-retryable error, don't retry
                 raise
             
-            if attempt < max_retries:
+            # Check if this is a gateway timeout error (504) on first attempt
+            if attempt == 0:
+                is_gateway_timeout = "504" in error_msg or "gateway time-out" in error_msg.lower() or "gateway timeout" in error_msg.lower()
+                if is_gateway_timeout:
+                    # Use more retries and longer backoff for gateway timeouts
+                    effective_max_retries = MAX_LTP_RETRIES_GATEWAY_TIMEOUT
+                    backoff = INITIAL_BACKOFF_GATEWAY_TIMEOUT
+                    logging.info(f"Detected gateway timeout error, using extended retry strategy ({effective_max_retries} retries)")
+            
+            if attempt < effective_max_retries:
                 logging.warning(
-                    f"Retryable API error (attempt {attempt + 1}/{max_retries + 1}): {error_msg}. "
+                    f"Retryable API error (attempt {attempt + 1}/{effective_max_retries + 1}): {error_msg}. "
                     f"Retrying in {backoff:.1f}s..."
                 )
                 time_module.sleep(backoff)
                 backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
+                attempt += 1
+            else:
+                # All retries exhausted
+                break
     
     raise last_exception
 
