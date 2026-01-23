@@ -11,13 +11,16 @@ backlog = 2048
 
 # Worker processes
 workers = 1  # Single worker for Azure App Service
+# Use sync worker to avoid sendfile issues with non-blocking sockets
+# gthread worker causes "ValueError: non-blocking sockets are not supported" when using sendfile
 worker_class = "sync"
 worker_connections = 1000
 timeout = 600  # 10 minutes - long timeout for slow startup
 keepalive = 5
 
 # Threading (if using threads worker class)
-threads = 2
+# Note: threads are not used with sync worker class
+threads = 1  # Set to 1 for sync worker (threads not used)
 
 # Logging
 accesslog = "-"  # Log to stdout (captured by Azure)

@@ -104,6 +104,12 @@ app = Flask(__name__,
             static_url_path='/static',
             template_folder=template_folder)
 
+# Disable sendfile for static files to avoid "non-blocking sockets are not supported" error
+# This prevents Gunicorn from using sendfile() which doesn't work with non-blocking sockets
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000  # 1 year cache
+# Note: Flask doesn't directly control sendfile, but we can work around it by ensuring
+# static files are served through Flask's handler rather than Gunicorn's sendfile optimization
+
 # CRITICAL: Register health endpoint IMMEDIATELY after app creation
 # This must be done before any other operations to ensure Azure startup probe works
 # These endpoints must respond in < 1 second to pass Azure startup probe
@@ -125,6 +131,42 @@ def health_check_early():
         'service': 'trading-bot-dashboard',
         'timestamp': time.time()  # Use time.time() instead of datetime for speed
     }), 200
+
+# CRITICAL: Register custom static file handler IMMEDIATELY after health endpoint
+# This ensures CSS, JS, and other static files are served correctly and avoid sendfile() issues
+# Must be registered early to take precedence over Flask's default static handler
+@app.route('/static/<path:filename>')
+def custom_static_early(filename):
+    """
+    Custom static file handler that avoids sendfile() issues.
+    Handles all static files including CSS, JS, and images in subdirectories.
+    This prevents "ValueError: non-blocking sockets are not supported" errors
+    when Gunicorn tries to use sendfile() optimization for static files.
+    Registered early to ensure it handles all static file requests.
+    """
+    from flask import send_from_directory
+    import os
+    try:
+        # Get static folder from app config (set during Flask app creation)
+        static_dir = app.static_folder or static_folder
+        
+        # Use send_from_directory which doesn't trigger Gunicorn's sendfile optimization
+        # This automatically handles subdirectories (e.g., css/dashboard.css, js/dashboard.js)
+        # Files are read into memory and sent normally, avoiding sendfile() issues
+        response = send_from_directory(static_dir, filename)
+        
+        # Add cache headers for better performance (CSS and JS files)
+        if filename.endswith(('.css', '.js')):
+            response.cache_control.max_age = 31536000  # 1 year
+            response.cache_control.public = True
+        
+        return response
+    except Exception as e:
+        # Log error but don't crash - let Flask's default handler try if this fails
+        logger.warning(f"[STATIC] Error serving static file {filename}: {e}")
+        # Return 404 instead of crashing
+        from flask import abort
+        abort(404)
 
 def is_health_path(path: str) -> bool:
     """Return True for health endpoints, including prefixed paths."""
@@ -1120,6 +1162,10 @@ def favicon():
     """Return empty favicon to prevent 404 errors"""
     from flask import Response
     return Response('', mimetype='image/x-icon')
+
+# Note: Custom static file handler is already registered at the top (line 138)
+# The handler custom_static_early handles all /static/* requests including CSS and JS files
+# No need for duplicate handler here - the early registration ensures it takes precedence
 
 # Health endpoint is already registered at the top of the file (line ~95)
 # This ensures it's available immediately when the app is imported

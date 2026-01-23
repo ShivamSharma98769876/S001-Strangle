@@ -72,7 +72,7 @@ if command -v gunicorn &> /dev/null; then
         --bind 0.0.0.0:$PORT \
         --timeout 600 \
         --workers 1 \
-        --threads 2 \
+        --worker-class sync \
         --access-logfile - \
         --error-logfile - \
         --log-level info \
