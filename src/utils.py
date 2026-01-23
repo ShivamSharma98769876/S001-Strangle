@@ -129,6 +129,8 @@ def display_vix_summary(kite_client, days=None):
         if vix_summary['average_vix'] is not None:
             print(f"📈 Current VIX: {vix_summary['current_vix']:.2f}")
             print(f"📊 Average VIX ({vix_summary['days_count']} days): {vix_summary['average_vix']:.2f}")
+            if vix_summary.get('percentile_90_vix') is not None:
+                print(f"🎯 90th Percentile VIX ({vix_summary['days_count']} days, for trade decisions): {vix_summary['percentile_90_vix']:.2f}")
             print(f"📉 Trend: {vix_summary['trend_direction']} {vix_summary['trend']}")
             
             if vix_summary['difference'] != 0:

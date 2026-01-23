@@ -29,27 +29,29 @@ class VIXDeltaManager:
     
     def get_delta_range(self):
         """
-        Get the appropriate delta range based on current VIX levels
+        Get the appropriate delta range based on 90th percentile VIX levels (for trade decisions)
         
         Returns:
             tuple: (delta_low, delta_high, hedge_points, use_next_week_expiry)
         """
         try:
-            # Get current VIX
+            # Get VIX summary with 90th percentile
             vix_summary = self.vix_calculator.get_vix_summary()
-            current_vix = vix_summary.get('current_vix')
+            # Use 90th percentile VIX for trade decisions instead of current VIX
+            percentile_90_vix = vix_summary.get('percentile_90_vix')
+            current_vix = vix_summary.get('current_vix')  # Keep for reference
             
-            if current_vix is None:
-                logging.warning("Unable to get VIX data, using default delta range")
+            if percentile_90_vix is None:
+                logging.warning("Unable to get 90th percentile VIX data, using default delta range")
                 return self._get_default_delta_range()
             
-            # Check if current VIX is above threshold
-            if current_vix > VIX_DELTA_THRESHOLD:
-                logging.info(f"Current VIX ({current_vix:.2f}) is above threshold ({VIX_DELTA_THRESHOLD}), using default delta range")
+            # Check if 90th percentile VIX is above threshold
+            if percentile_90_vix > VIX_DELTA_THRESHOLD:
+                logging.info(f"90th percentile VIX ({percentile_90_vix:.2f}) is above threshold ({VIX_DELTA_THRESHOLD}), using default delta range")
                 self.using_vix_based_delta = False
                 return self._get_default_delta_range()
             else:
-                logging.info(f"Current VIX ({current_vix:.2f}) is at/below threshold ({VIX_DELTA_THRESHOLD}), using VIX-based delta range")
+                logging.info(f"90th percentile VIX ({percentile_90_vix:.2f}) is at/below threshold ({VIX_DELTA_THRESHOLD}), using VIX-based delta range")
                 self.using_vix_based_delta = True
                 self.current_delta_low = VIX_DELTA_LOW
                 self.current_delta_high = VIX_DELTA_HIGH
@@ -131,25 +133,28 @@ class VIXDeltaManager:
         """
         try:
             vix_summary = self.vix_calculator.get_vix_summary()
+            percentile_90_vix = vix_summary.get('percentile_90_vix')
             average_vix = vix_summary.get('average_vix')
             current_vix = vix_summary.get('current_vix')
             
             return {
                 'current_vix': current_vix,
                 'average_vix': average_vix,
+                'percentile_90_vix': percentile_90_vix,
                 'threshold': VIX_DELTA_THRESHOLD,
                 'using_vix_based_delta': self.using_vix_based_delta,
                 'delta_low': self.current_delta_low,
                 'delta_high': self.current_delta_high,
                 'hedge_points': self.current_hedge_points,
                 'use_next_week_expiry': self.next_week_expiry_used,
-                'reason': self._get_delta_reason(average_vix)
+                'reason': self._get_delta_reason(percentile_90_vix)
             }
         except Exception as e:
             logging.error(f"Error getting VIX status: {e}")
             return {
                 'current_vix': None,
                 'average_vix': None,
+                'percentile_90_vix': None,
                 'threshold': VIX_DELTA_THRESHOLD,
                 'using_vix_based_delta': False,
                 'delta_low': self.current_delta_low,
@@ -159,22 +164,22 @@ class VIXDeltaManager:
                 'reason': 'Error fetching VIX data'
             }
     
-    def _get_delta_reason(self, current_vix):
+    def _get_delta_reason(self, percentile_90_vix):
         """
         Get the reason for current delta configuration
         
         Args:
-            current_vix: Current VIX value
+            percentile_90_vix: 90th percentile VIX value (used for trade decisions)
             
         Returns:
             str: Reason for delta configuration
         """
-        if current_vix is None:
-            return "Using default delta range (VIX data unavailable)"
-        elif current_vix <= VIX_DELTA_THRESHOLD:
-            return f"Using VIX-based delta range (VIX {current_vix:.2f} <= {VIX_DELTA_THRESHOLD})"
+        if percentile_90_vix is None:
+            return "Using default delta range (90th percentile VIX data unavailable)"
+        elif percentile_90_vix <= VIX_DELTA_THRESHOLD:
+            return f"Using VIX-based delta range (90th percentile VIX {percentile_90_vix:.2f} <= {VIX_DELTA_THRESHOLD})"
         else:
-            return f"Using default delta range (VIX {current_vix:.2f} > {VIX_DELTA_THRESHOLD})"
+            return f"Using default delta range (90th percentile VIX {percentile_90_vix:.2f} > {VIX_DELTA_THRESHOLD})"
     
     def log_delta_configuration(self):
         """
@@ -187,6 +192,7 @@ class VIXDeltaManager:
         logging.info("=" * 60)
         logging.info(f"Current VIX: {status['current_vix']:.2f}" if status['current_vix'] else "Current VIX: N/A")
         logging.info(f"Average VIX: {status['average_vix']:.2f}" if status['average_vix'] else "Average VIX: N/A")
+        logging.info(f"90th Percentile VIX (for trade decisions): {status['percentile_90_vix']:.2f}" if status['percentile_90_vix'] else "90th Percentile VIX: N/A")
         logging.info(f"VIX Threshold: {status['threshold']}")
         logging.info(f"Using VIX-based Delta: {status['using_vix_based_delta']}")
         logging.info(f"Delta Range: {status['delta_low']:.2f} - {status['delta_high']:.2f}")

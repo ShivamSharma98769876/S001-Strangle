@@ -3275,9 +3275,43 @@ def find_hedges(call_strike, put_strike, use_next_week_expiry=False):
 
     return call_hedge, put_hedge
 
+def _calculate_percentile(values, percentile):
+    """
+    Calculate percentile of a list of values
+    
+    Args:
+        values (list): List of numeric values
+        percentile (float): Percentile to calculate (0-100)
+        
+    Returns:
+        float: Percentile value or None if empty
+    """
+    if not values:
+        return None
+    
+    sorted_values = sorted(values)
+    index = (percentile / 100.0) * (len(sorted_values) - 1)
+    
+    # Handle integer index
+    if index.is_integer():
+        return sorted_values[int(index)]
+    
+    # Interpolate for fractional index
+    lower_index = int(index)
+    upper_index = lower_index + 1
+    
+    if upper_index >= len(sorted_values):
+        return sorted_values[-1]
+    
+    lower_value = sorted_values[lower_index]
+    upper_value = sorted_values[upper_index]
+    fraction = index - lower_index
+    
+    return lower_value + (upper_value - lower_value) * fraction
+
 def get_vix_based_delta_range():
     """
-    Get delta range based on VIX levels
+    Get delta range based on 90th percentile VIX levels (for trade decisions)
     
     Returns:
         tuple: (delta_low, delta_high, hedge_points, use_next_week_expiry)
@@ -3292,7 +3326,7 @@ def get_vix_based_delta_range():
         
         current_vix_display = current_vix * 100  # Convert back to display format
         
-        # Get historical VIX data for average calculation
+        # Get historical VIX data for 90th percentile calculation
         try:
             # Calculate date range for historical data
             end_date = date.today()
@@ -3310,22 +3344,28 @@ def get_vix_based_delta_range():
                 days_for_historical = VIX_HISTORICAL_DAYS - 1
                 historical_vix_values = [candle['close'] for candle in historical_data[-days_for_historical:]]
                 
-                # Combine with current VIX for average
+                # Combine with current VIX for 90th percentile calculation
                 all_vix_values = historical_vix_values + [current_vix_display]
-                average_vix = sum(all_vix_values) / len(all_vix_values)
                 
-                # Check if average VIX is below threshold
-                if average_vix < VIX_DELTA_THRESHOLD:
-                    logging.info(f"[CALENDAR STRATEGY] Average VIX {average_vix:.2f} < {VIX_DELTA_THRESHOLD}, using wider delta range with next week hedges")
+                # Calculate 90th percentile VIX (for trade decisions)
+                percentile_90_vix = _calculate_percentile(all_vix_values, 90)
+                
+                if percentile_90_vix is None:
+                    logging.warning("Unable to calculate 90th percentile VIX, using VIX-based delta range as fallback")
+                    return VIX_DELTA_LOW, VIX_DELTA_HIGH, VIX_HEDGE_POINTS_CANDR, True
+                
+                # Check if 90th percentile VIX is below threshold
+                if percentile_90_vix < VIX_DELTA_THRESHOLD:
+                    logging.info(f"[CALENDAR STRATEGY] 90th percentile VIX {percentile_90_vix:.2f} < {VIX_DELTA_THRESHOLD}, using wider delta range with next week hedges")
                     return VIX_DELTA_LOW, VIX_DELTA_HIGH, VIX_HEDGE_POINTS_CANDR, True
                 else:
-                    logging.info(f"[STRANGLE STRATEGY] Average VIX {average_vix:.2f} >= {VIX_DELTA_THRESHOLD}, using default delta range with same week hedges")
+                    logging.info(f"[STRANGLE STRATEGY] 90th percentile VIX {percentile_90_vix:.2f} >= {VIX_DELTA_THRESHOLD}, using default delta range with same week hedges")
                     return TARGET_DELTA_LOW, TARGET_DELTA_HIGH, HEDGE_TRIGGER_POINTS_STRANGLE, False
             else:
                 logging.warning("Unable to fetch historical VIX data, using VIX-based delta range as fallback")
                 return VIX_DELTA_LOW, VIX_DELTA_HIGH, VIX_HEDGE_POINTS_CANDR, True
         except Exception as e:
-            logging.error(f"Error calculating VIX average for delta range: {e}")
+            logging.error(f"Error calculating 90th percentile VIX for delta range: {e}")
             return VIX_DELTA_LOW, VIX_DELTA_HIGH, VIX_HEDGE_POINTS_CANDR, True
             
     except Exception as e:
@@ -3360,7 +3400,7 @@ def validate_delta_range_consistency(delta_low, delta_high, context=""):
         return False
 
 def display_vix_analysis():
-    """Display VIX analysis including current and average VIX"""
+    """Display VIX analysis including current, average, and 90th percentile VIX"""
     try:
         print("\n" + "="*60)
         print("[VIX ANALYSIS]")
@@ -3375,7 +3415,7 @@ def display_vix_analysis():
         current_vix_display = current_vix * 100  # Convert back to display format
         print(f"[CURRENT] VIX: {current_vix_display:.2f}")
         
-        # Get historical VIX data for average calculation
+        # Get historical VIX data for calculations
         try:
             # Calculate date range for historical data
             end_date = date.today()
@@ -3393,11 +3433,15 @@ def display_vix_analysis():
                 days_for_historical = VIX_HISTORICAL_DAYS - 1
                 historical_vix_values = [candle['close'] for candle in historical_data[-days_for_historical:]]
                 
-                # Combine with current VIX for VIX_HISTORICAL_DAYS average
+                # Combine with current VIX for VIX_HISTORICAL_DAYS calculations
                 all_vix_values = historical_vix_values + [current_vix_display]
                 average_vix = sum(all_vix_values) / len(all_vix_values)
                 
+                # Calculate 90th percentile VIX (for trade decisions)
+                percentile_90_vix = _calculate_percentile(all_vix_values, 90)
+                
                 print(f"[AVERAGE] VIX ({VIX_HISTORICAL_DAYS} days): {average_vix:.2f}")
+                print(f"[90TH PERCENTILE] VIX ({VIX_HISTORICAL_DAYS} days, for trade decisions): {percentile_90_vix:.2f}" if percentile_90_vix else "[90TH PERCENTILE] VIX: N/A")
                 
                 # Calculate trend
                 if current_vix_display > average_vix:
@@ -3421,32 +3465,35 @@ def display_vix_analysis():
                 print(f"[HISTORY] Last {VIX_HISTORICAL_DAYS} days VIX: {', '.join([f'{v:.2f}' for v in all_vix_values])}")
                 
                 
-                # Display VIX-based delta recommendation
+                # Display VIX-based delta recommendation (using 90th percentile for trade decisions)
                 try:
                     print(f"\n[VIX-BASED DELTA RECOMMENDATION]")
                     
-                    # Check if average VIX is below threshold
-                    if average_vix < VIX_DELTA_THRESHOLD:
-                        print(f"   Strategy: [CALENDAR] CALENDAR STRATEGY")
-                        print(f"   Delta Range: {VIX_DELTA_LOW:.2f} - {VIX_DELTA_HIGH:.2f} (VIX-based)")
-                        print(f"   Hedge Points: {VIX_HEDGE_POINTS_CANDR}")
-                        print(f"   Hedge Expiry: Next Week")
-                        print(f"   Reason: VIX {average_vix:.2f} < {VIX_DELTA_THRESHOLD} - using wider delta range with next week hedges")
+                    # Check if 90th percentile VIX is below threshold (for trade decisions)
+                    if percentile_90_vix is not None:
+                        if percentile_90_vix < VIX_DELTA_THRESHOLD:
+                            print(f"   Strategy: [CALENDAR] CALENDAR STRATEGY")
+                            print(f"   Delta Range: {VIX_DELTA_LOW:.2f} - {VIX_DELTA_HIGH:.2f} (VIX-based)")
+                            print(f"   Hedge Points: {VIX_HEDGE_POINTS_CANDR}")
+                            print(f"   Hedge Expiry: Next Week")
+                            print(f"   Reason: 90th percentile VIX {percentile_90_vix:.2f} < {VIX_DELTA_THRESHOLD} - using wider delta range with next week hedges")
+                        else:
+                            print(f"   Strategy: [STRANGLE] STRANGLE STRATEGY")
+                            print(f"   Delta Range: {TARGET_DELTA_LOW:.2f} - {TARGET_DELTA_HIGH:.2f} (Default)")
+                            print(f"   Hedge Points: {HEDGE_TRIGGER_POINTS}")
+                            print(f"   Hedge Expiry: Same Week")
+                            print(f"   Reason: 90th percentile VIX {percentile_90_vix:.2f} >= {VIX_DELTA_THRESHOLD} - using default delta range with same week hedges")
                     else:
-                        print(f"   Strategy: [STRANGLE] STRANGLE STRATEGY")
-                        print(f"   Delta Range: {TARGET_DELTA_LOW:.2f} - {TARGET_DELTA_HIGH:.2f} (Default)")
-                        print(f"   Hedge Points: {HEDGE_TRIGGER_POINTS}")
-                        print(f"   Hedge Expiry: Same Week")
-                        print(f"   Reason: VIX {average_vix:.2f} >= {VIX_DELTA_THRESHOLD} - using default delta range with same week hedges")
+                        print(f"   [WARNING] Unable to calculate 90th percentile VIX for trade decision")
                 except Exception as e:
                     print(f"[WARNING] Could not get delta recommendation: {e}")
             else:
                 print("[WARNING] Unable to fetch historical VIX data")
                 print(f"[CURRENT] VIX: {current_vix_display:.2f}")
         except Exception as e:
-            logging.error(f"Error calculating VIX average: {e}")
+            logging.error(f"Error calculating VIX statistics: {e}")
             print(f"[CURRENT] VIX: {current_vix_display:.2f}")
-            print("[WARNING] Unable to calculate average VIX")
+            print("[WARNING] Unable to calculate VIX statistics")
         
         print("="*60)
         print()
