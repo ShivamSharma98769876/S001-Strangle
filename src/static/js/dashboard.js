@@ -9,6 +9,54 @@ let cumulativePnlChart = null;
 const requestCache = new Map();
 const CACHE_TTL = 5000; // 5 seconds cache TTL
 
+// Fetch with timeout and retry logic
+async function fetchWithTimeout(url, options = {}, timeout = 30000, maxRetries = 2) {
+    let lastError;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+        
+        try {
+            const response = await fetch(url, {
+                ...options,
+                signal: controller.signal,
+                credentials: 'include'
+            });
+            clearTimeout(timeoutId);
+            return response;
+        } catch (error) {
+            clearTimeout(timeoutId);
+            lastError = error;
+            
+            // Don't retry on abort (timeout) or if we've exhausted retries
+            if (error.name === 'AbortError') {
+                // Timeout - only retry if we have attempts left
+                if (attempt < maxRetries) {
+                    const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+                    console.warn(`[FETCH] Timeout for ${url}, retry ${attempt + 1}/${maxRetries} after ${delay}ms`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+                break;
+            }
+            
+            // For other errors, retry with exponential backoff
+            if (attempt < maxRetries) {
+                const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+                console.warn(`[FETCH] Error for ${url}, retry ${attempt + 1}/${maxRetries} after ${delay}ms:`, error.message);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                continue;
+            }
+            
+            // Last attempt failed
+            break;
+        }
+    }
+    
+    // If all retries failed, throw the last error
+    throw lastError || new Error(`Request failed after ${maxRetries + 1} attempts`);
+}
+
 // Cached fetch with TTL - only for safe GET requests, simplified implementation
 async function cachedFetch(url, options = {}) {
     // Don't cache POST requests or auth endpoints
@@ -16,8 +64,8 @@ async function cachedFetch(url, options = {}) {
     const isAuthEndpoint = url.includes('/api/auth/');
     
     if (method !== 'GET' || isAuthEndpoint) {
-        // For non-GET or auth endpoints, just use regular fetch
-        return fetch(url, { ...options, credentials: 'include' });
+        // For non-GET or auth endpoints, use fetch with timeout
+        return fetchWithTimeout(url, options, 30000, 1);
     }
     
     const cacheKey = `${url}_${JSON.stringify(options)}`;
@@ -43,8 +91,8 @@ async function cachedFetch(url, options = {}) {
         });
     }
     
-    // Make fresh request
-    const response = await fetch(url, { ...options, credentials: 'include' });
+    // Make fresh request with timeout
+    const response = await fetchWithTimeout(url, options, 30000, 1);
     
     // Cache successful JSON responses (read and cache in background)
     if (response.ok) {
@@ -458,9 +506,7 @@ function updateAuthUI(authenticated, authData = null) {
 // Check connectivity
 async function checkConnectivity() {
     try {
-        const response = await fetch('/api/connectivity', {
-            credentials: 'include'
-        });
+        const response = await fetchWithTimeout('/api/connectivity', {}, 15000, 1);
         if (!response.ok) return;
         
         const data = await response.json();
@@ -524,6 +570,11 @@ async function updateStatus() {
     try {
         const response = await cachedFetch('/api/dashboard/status');
         if (!response.ok) {
+            // Handle timeout and gateway errors gracefully
+            if (response.status === 504 || response.status === 499) {
+                console.warn('[STATUS] Server timeout, will retry on next update cycle');
+                return;
+            }
             if (response.status === 401) {
                 // Not authenticated, stop updates
                 isAuthenticated = false;
@@ -630,6 +681,11 @@ async function updateTrades() {
         
         const response = await cachedFetch(url);
         if (!response.ok) {
+            // Handle timeout and gateway errors gracefully
+            if (response.status === 504 || response.status === 499) {
+                console.warn('[TRADES] Server timeout, will retry on next update cycle');
+                return;
+            }
             if (response.status === 401) {
                 // Not authenticated, stop updates
                 isAuthenticated = false;
@@ -771,10 +827,13 @@ async function updateCumulativePnl() {
     }
     
     try {
-        const response = await fetch('/api/dashboard/cumulative-pnl', {
-            credentials: 'include'
-        });
+        const response = await fetchWithTimeout('/api/dashboard/cumulative-pnl', {}, 20000, 1);
         if (!response.ok) {
+            // Handle timeout and gateway errors gracefully
+            if (response.status === 504 || response.status === 499) {
+                console.warn('[CUMULATIVE-PNL] Server timeout, will retry on next update cycle');
+                return;
+            }
             if (response.status === 401) {
                 // Not authenticated, stop updates
                 isAuthenticated = false;
@@ -895,7 +954,11 @@ function startUpdates() {
     if (!isAuthenticated) return;
     
     stopUpdates();
-    updateAll();
+    
+    // Initial update with delay to allow server to fully start
+    setTimeout(() => {
+        updateAll();
+    }, 2000); // Wait 2 seconds before first update
     
     // Optimized: Increase polling interval to reduce server load
     // Use 30 seconds for dashboard updates (was 10 seconds)
@@ -908,7 +971,10 @@ function startUpdates() {
     }, 30000); // Update every 30 seconds (optimized from 10 seconds)
     
     // Check connectivity every 60 seconds (optimized from 15 seconds)
-    checkConnectivity();
+    // Also delay initial connectivity check
+    setTimeout(() => {
+        checkConnectivity();
+    }, 3000); // Wait 3 seconds before first connectivity check
     setInterval(checkConnectivity, 60000);
 }
 
@@ -1015,15 +1081,17 @@ async function disconnectZerodha() {
     }
     
     try {
-        const response = await fetch('/api/auth/disconnect', addJwtTokenToBody({
+        const response = await fetchWithTimeout('/api/auth/disconnect', addJwtTokenToBody({
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             credentials: 'include'
-        }));
+        }), 15000, 1);
         
-        const data = await response.json();
+        // Safely parse JSON response using helper function
+        // This handles 401 errors and non-JSON responses gracefully
+        const data = await safeJsonResponse(response);
         
-        if (data.success) {
+        if (data && data.success) {
             // Update UI - set authentication state to false
             isAuthenticated = false;
             updateAuthUI(false);
@@ -1065,11 +1133,22 @@ async function disconnectZerodha() {
             // Refresh page to reset state
             window.location.reload();
         } else {
-            alert('Error disconnecting: ' + (data.error || 'Unknown error'));
+            alert('Error disconnecting: ' + (data.error || data.message || 'Unknown error'));
         }
     } catch (error) {
         console.error('Error disconnecting:', error);
-        alert('Error disconnecting: ' + error.message);
+        // Show user-friendly error message
+        const errorMessage = error.message || 'Unknown error occurred';
+        alert('Error disconnecting: ' + errorMessage);
+        
+        // Even if disconnect failed, try to clear local state
+        try {
+            isAuthenticated = false;
+            updateAuthUI(false);
+            stopUpdates();
+        } catch (stateError) {
+            console.error('Error clearing local state:', stateError);
+        }
     }
 }
 
@@ -1086,10 +1165,11 @@ document.addEventListener('DOMContentLoaded', function() {
     initializePnlCalendar();
     setupEventListeners();
 
-    // Check auth status after a small delay to ensure UI is ready
+    // Check auth status after a delay to allow server to fully start
+    // This helps avoid 504 errors on morning startup
     setTimeout(() => {
         checkAuthStatus();
-    }, 100);
+    }, 2000); // Increased delay to 2 seconds for server startup
 
     // Don't check connectivity or update details until authenticated
     // These will be called by checkAuthStatus if authenticated
@@ -1269,17 +1349,30 @@ function formatCurrencyCompact(value) {
     }
 }
 
-// Update cumulative P&L from API
-async function updateCumulativePnl() {
+// Update cumulative P&L from API (duplicate - using the one with timeout handling)
+async function updateCumulativePnlFromAPI() {
     // Don't update if not authenticated
     if (!isAuthenticated) {
         return;
     }
     
     try {
-        const response = await fetch('/api/dashboard/cumulative-pnl', {
-            credentials: 'include'
-        });
+        const response = await fetchWithTimeout('/api/dashboard/cumulative-pnl', {}, 20000, 1);
+        if (!response.ok) {
+            // Handle timeout and gateway errors gracefully
+            if (response.status === 504 || response.status === 499) {
+                console.warn('[CUMULATIVE-PNL] Server timeout, will retry on next update cycle');
+                return;
+            }
+            if (response.status === 401) {
+                // Not authenticated, stop updates
+                isAuthenticated = false;
+                updateAuthUI(false);
+                stopUpdates();
+            }
+            return;
+        }
+        
         if (response.ok) {
             const data = await response.json();
             if (data.status === 'success') {
