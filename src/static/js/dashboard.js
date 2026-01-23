@@ -9,9 +9,11 @@ let cumulativePnlChart = null;
 const requestCache = new Map();
 const CACHE_TTL = 5000; // 5 seconds cache TTL
 
-// Fetch with timeout and retry logic
+// Fetch with timeout and retry logic (handles 502 Bad Gateway errors)
 async function fetchWithTimeout(url, options = {}, timeout = 30000, maxRetries = 2) {
     let lastError;
+    let lastResponse;
+    
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -23,7 +25,23 @@ async function fetchWithTimeout(url, options = {}, timeout = 30000, maxRetries =
                 credentials: 'include'
             });
             clearTimeout(timeoutId);
+            
+            // Handle 502 Bad Gateway - server might be restarting
+            if (response.status === 502) {
+                lastResponse = response;
+                if (attempt < maxRetries) {
+                    const delay = Math.min(2000 * Math.pow(2, attempt), 10000); // Longer delay for 502
+                    console.warn(`[FETCH] 502 Bad Gateway for ${url}, retry ${attempt + 1}/${maxRetries} after ${delay}ms`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+                // Last attempt - return the 502 response
+                return response;
+            }
+            
+            // For other non-OK responses, return immediately (don't retry)
             return response;
+            
         } catch (error) {
             clearTimeout(timeoutId);
             lastError = error;
@@ -40,10 +58,10 @@ async function fetchWithTimeout(url, options = {}, timeout = 30000, maxRetries =
                 break;
             }
             
-            // For other errors, retry with exponential backoff
+            // For network errors, retry with exponential backoff
             if (attempt < maxRetries) {
                 const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
-                console.warn(`[FETCH] Error for ${url}, retry ${attempt + 1}/${maxRetries} after ${delay}ms:`, error.message);
+                console.warn(`[FETCH] Network error for ${url}, retry ${attempt + 1}/${maxRetries} after ${delay}ms:`, error.message);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 continue;
             }
@@ -51,6 +69,11 @@ async function fetchWithTimeout(url, options = {}, timeout = 30000, maxRetries =
             // Last attempt failed
             break;
         }
+    }
+    
+    // If we have a 502 response, return it
+    if (lastResponse && lastResponse.status === 502) {
+        return lastResponse;
     }
     
     // If all retries failed, throw the last error
@@ -571,6 +594,10 @@ async function updateStatus() {
         const response = await cachedFetch('/api/dashboard/status');
         if (!response.ok) {
             // Handle timeout and gateway errors gracefully
+            if (response.status === 502) {
+                console.warn('[STATUS] 502 Bad Gateway - server may be restarting, will retry on next update cycle');
+                return;
+            }
             if (response.status === 504 || response.status === 499) {
                 console.warn('[STATUS] Server timeout, will retry on next update cycle');
                 return;
@@ -682,6 +709,10 @@ async function updateTrades() {
         const response = await cachedFetch(url);
         if (!response.ok) {
             // Handle timeout and gateway errors gracefully
+            if (response.status === 502) {
+                console.warn('[TRADES] 502 Bad Gateway - server may be restarting, will retry on next update cycle');
+                return;
+            }
             if (response.status === 504 || response.status === 499) {
                 console.warn('[TRADES] Server timeout, will retry on next update cycle');
                 return;
@@ -830,6 +861,10 @@ async function updateCumulativePnl() {
         const response = await fetchWithTimeout('/api/dashboard/cumulative-pnl', {}, 20000, 1);
         if (!response.ok) {
             // Handle timeout and gateway errors gracefully
+            if (response.status === 502) {
+                console.warn('[CUMULATIVE-PNL] 502 Bad Gateway - server may be restarting, will retry on next update cycle');
+                return;
+            }
             if (response.status === 504 || response.status === 499) {
                 console.warn('[CUMULATIVE-PNL] Server timeout, will retry on next update cycle');
                 return;
@@ -1360,6 +1395,10 @@ async function updateCumulativePnlFromAPI() {
         const response = await fetchWithTimeout('/api/dashboard/cumulative-pnl', {}, 20000, 1);
         if (!response.ok) {
             // Handle timeout and gateway errors gracefully
+            if (response.status === 502) {
+                console.warn('[CUMULATIVE-PNL] 502 Bad Gateway - server may be restarting, will retry on next update cycle');
+                return;
+            }
             if (response.status === 504 || response.status === 499) {
                 console.warn('[CUMULATIVE-PNL] Server timeout, will retry on next update cycle');
                 return;

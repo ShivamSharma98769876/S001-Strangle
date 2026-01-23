@@ -107,16 +107,24 @@ app = Flask(__name__,
 # CRITICAL: Register health endpoint IMMEDIATELY after app creation
 # This must be done before any other operations to ensure Azure startup probe works
 # These endpoints must respond in < 1 second to pass Azure startup probe
-@app.route('/health')
-@app.route('/healthz')
+@app.route('/health', methods=['GET', 'HEAD'])
+@app.route('/healthz', methods=['GET', 'HEAD'])
 def health_check_early():
     """
     Health check endpoint for Azure App Service startup probe - must respond immediately.
     This endpoint has ZERO dependencies and responds instantly.
+    Azure requires response in < 1 second for health probe to pass.
     """
-    # Return immediately - absolutely minimal response (no imports, no dependencies)
+    # Return immediately - absolutely minimal response (no slow imports)
     # This is critical for Azure startup probe to succeed
-    return {'status': 'healthy', 'service': 'trading-bot-dashboard'}, 200
+    # Use jsonify for proper JSON response with correct headers
+    from flask import jsonify
+    import time
+    return jsonify({
+        'status': 'healthy',
+        'service': 'trading-bot-dashboard',
+        'timestamp': time.time()  # Use time.time() instead of datetime for speed
+    }), 200
 
 def is_health_path(path: str) -> bool:
     """Return True for health endpoints, including prefixed paths."""
@@ -707,13 +715,16 @@ def admin_panel():
 @app.before_request
 def check_session_expiration():
     """Check and extend session on each request, enforce JWT authentication on cloud for ALL routes"""
-    # List of public routes that should NEVER require authentication (health checks only)
-    public_routes = ['/health', '/healthz', '/favicon.ico', '/static']
+    # CRITICAL: Health endpoints must be checked FIRST and return immediately
+    # This ensures health checks are never blocked by authentication or session logic
+    if is_health_path(request.path):
+        return None  # Skip all processing for health checks - return immediately
     
-    # Skip authentication check for public routes (health checks)
+    # List of public routes that should NEVER require authentication (health checks already handled above)
+    public_routes = ['/favicon.ico', '/static']
+    
+    # Skip authentication check for public routes
     is_public = any(request.path == route or request.path.startswith(route + '/') for route in public_routes)
-    if not is_public and is_health_path(request.path):
-        is_public = True
     if is_public:
         # Still extend session if authenticated, but don't block
         if SaaSSessionManager.is_authenticated():
